@@ -1,9 +1,6 @@
 """Schaerer-style super-automatic espresso machine profile."""
 
-try:
-    import random
-except ImportError:
-    random = None
+from core.rng import SeededRng
 
 EQUIPMENT_TYPE = "super_automatic_espresso"
 
@@ -30,7 +27,7 @@ class EspressoMachine:
     """Generates healthy baseline signals and tracks counters/state."""
 
     def __init__(self, seed=42):
-        self._rng = random.Random(seed) if random else None
+        self._rng = SeededRng(seed)
         self._tick = 0
         self._state = "idle"
         self._state_ticks = 0

@@ -31,7 +31,7 @@ def scan(timeout_s=10):
     return wlan.scan()
 
 
-def connect(ssid, password, timeout_s=30):
+def connect(ssid, password, timeout_s=30, tick_fn=None):
     if not _HAS_NETWORK:
         return True
     wlan = network.WLAN(network.STA_IF)
@@ -42,6 +42,8 @@ def connect(ssid, password, timeout_s=30):
     for _ in range(timeout_s * 2):
         if wlan.isconnected():
             return True
+        if tick_fn:
+            tick_fn()
         try:
             import time
             time.sleep(0.5)

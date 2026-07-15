@@ -83,11 +83,17 @@ mp_cp firmware/boot.py :boot.py
 mp_cp firmware/config.json :config.json
 mp_cp secrets.py :secrets.py
 
-"${MRP[@]}" exec "import os; os.mkdir('core')" 2>/dev/null || true
+"${MRP[@]}" exec "import os
+try:
+    os.mkdir('core')
+except OSError:
+    pass" > /dev/null
+
 mp_cp core/__init__.py ':core/__init__.py'
 mp_cp core/aggregation.py ':core/aggregation.py'
 mp_cp core/buffer.py ':core/buffer.py'
 mp_cp core/config.py ':core/config.py'
+mp_cp core/rng.py ':core/rng.py'
 mp_cp core/espresso.py ':core/espresso.py'
 mp_cp core/irregularities.py ':core/irregularities.py'
 mp_cp core/runtime.py ':core/runtime.py'
@@ -98,6 +104,7 @@ mp_cp firmware/platform/clock.py :clock.py
 mp_cp firmware/platform/mqtt.py :mqtt.py
 mp_cp firmware/platform/storage.py :storage.py
 mp_cp firmware/platform/wifi.py :wifi.py
+mp_cp firmware/platform/led.py :led.py
 
 echo "Copying main.py last ..."
 mp_cp firmware/main.py :main.py

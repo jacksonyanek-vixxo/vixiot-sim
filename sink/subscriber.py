@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import jsonschema
-import paho.mqtt.client as mqtt
 
 ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT.parent
@@ -16,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from sink.workorders import WorkOrderManager
+from sink.mqtt_util import make_client, configure_client, connect_client
 SCHEMA_PATH = ROOT / "schema" / "telemetry.schema.json"
 DATA_DIR = ROOT / "data"
 TELEMETRY_PATH = DATA_DIR / "telemetry.jsonl"
@@ -34,14 +34,15 @@ def append_jsonl(path, record):
 
 
 class Sink:
-    def __init__(self, broker, port, device_filter=None):
+    def __init__(self, broker, port, device_filter=None, username=None, password=None, tls=False):
         self.broker = broker
         self.port = port
         self.device_filter = device_filter
         self.schema = load_schema()
         self.devices_online = {}
         self._wo = WorkOrderManager(publish_fn=self._publish_workorder)
-        self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        self._client = make_client()
+        configure_client(self._client, username, password, tls)
         self._client.on_connect = self._on_connect
         self._client.on_message = self._on_message
 
@@ -94,7 +95,7 @@ class Sink:
             )
 
     def run(self):
-        self._client.connect(self.broker, self.port, keepalive=60)
+        connect_client(self._client, self.broker, self.port)
         print("[sink] listening on vixiot/+/telemetry and vixiot/+/state")
         self._client.loop_forever()
 
@@ -103,9 +104,12 @@ def main():
     parser = argparse.ArgumentParser(description="VixIoT MQTT sink subscriber")
     parser.add_argument("--broker", default="localhost")
     parser.add_argument("--port", type=int, default=1883)
+    parser.add_argument("--tls", action="store_true", help="Use TLS (e.g. HiveMQ Cloud port 8883)")
+    parser.add_argument("--user", default=None, help="MQTT username")
+    parser.add_argument("--password", default=None, help="MQTT password")
     parser.add_argument("--device", default=None, help="Filter to one device_id")
     args = parser.parse_args()
-    Sink(args.broker, args.port, args.device).run()
+    Sink(args.broker, args.port, args.device, args.user, args.password, args.tls).run()
 
 
 if __name__ == "__main__":
