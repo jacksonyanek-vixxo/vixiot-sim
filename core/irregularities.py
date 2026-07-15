@@ -28,12 +28,13 @@ class IrregularityEngine:
 
     def __init__(self, config=None, seed=99):
         self._rng = random.Random(seed) if random else None
-        self._config = config or {}
+        self._config = {}
         self._active_domain = set()
         self._drift_offsets = {}
         self._stuck_values = {}
         self._hours_elapsed = 0.0
         self._sample_count = 0
+        self.update_config(config or {})
 
     def update_config(self, config):
         self._config = config.get("irregularities", config) if isinstance(config, dict) else {}

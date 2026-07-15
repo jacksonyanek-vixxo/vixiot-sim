@@ -1,0 +1,18 @@
+{
+  "device_id": "espresso-001",
+  "sample_interval_ms": 100,
+  "publish_interval_s": 5,
+  "irregularities": {
+    "scaling": { "enabled": true, "mtbf_hours": 0.01, "severity": 1.0 },
+    "grinder_wear": { "enabled": true, "mtbf_hours": 0.01, "severity": 1.0 },
+    "pump_degradation": { "enabled": true, "mtbf_hours": 0.01, "severity": 1.0 },
+    "clogged_group": { "enabled": true, "mtbf_hours": 0.01, "severity": 1.0 },
+    "heater_degradation": { "enabled": true, "mtbf_hours": 0.01, "severity": 1.0 },
+    "spike": { "enabled": true, "rate_per_hour": 1200, "severity": 1.0 },
+    "drift": { "enabled": true, "rate_per_hour": 1200, "severity": 1.0 },
+    "stuck": { "enabled": true, "rate_per_hour": 600, "severity": 1.0 },
+    "dropout": { "enabled": true, "rate_per_hour": 600, "severity": 1.0 },
+    "out_of_range": { "enabled": true, "rate_per_hour": 600, "severity": 1.0 },
+    "noise": { "enabled": true, "rate_per_hour": 2400, "severity": 1.0 }
+  }
+}

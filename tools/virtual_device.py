@@ -35,9 +35,13 @@ def main():
     parser.add_argument("--device", default="espresso-001")
     parser.add_argument("--config", default=str(ROOT / "firmware" / "config.json"))
     parser.add_argument("--fast", action="store_true", help="Use 1s publish interval for demo")
+    parser.add_argument("--aggressive", action="store_true", help="Use firmware/config.aggressive.json")
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    config_path = args.config
+    if args.aggressive:
+        config_path = str(ROOT / "firmware" / "config.aggressive.json")
+    cfg = load_config(config_path)
     cfg["device_id"] = args.device
     if args.fast:
         cfg["sample_interval_ms"] = 500

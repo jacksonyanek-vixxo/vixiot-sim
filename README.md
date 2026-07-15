@@ -53,7 +53,11 @@ python tools/virtual_device.py --broker localhost --fast
 ### 5. Push config / enable scaling (terminal 3)
 
 ```bash
+# Mild: enable scaling only
 python sink/cli.py --broker localhost --enable-scaling --publish-interval-s 5
+
+# Aggressive: all faults + anomalies, 100ms sample / 5s publish
+python sink/cli.py --broker localhost --aggressive
 ```
 
 The sink will open a work order when `scaling` appears in `active_faults` and close it when the fault clears.
