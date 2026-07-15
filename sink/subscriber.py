@@ -10,9 +10,12 @@ from pathlib import Path
 import jsonschema
 import paho.mqtt.client as mqtt
 
-from sink.workorders import WorkOrderManager
-
 ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = ROOT.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from sink.workorders import WorkOrderManager
 SCHEMA_PATH = ROOT / "schema" / "telemetry.schema.json"
 DATA_DIR = ROOT / "data"
 TELEMETRY_PATH = DATA_DIR / "telemetry.jsonl"
