@@ -5,9 +5,10 @@ ESP32-S3 MicroPython firmware simulates a Schaerer-style super-automatic espress
 ## Architecture
 
 - **`core/`** — Portable simulation (equipment profile, irregularities, aggregation, scheduler, buffer)
-- **`firmware/`** — MicroPython entry point + platform adapters (WiFi, MQTT, flash, NTP)
+- **`firmware/`** — MicroPython entry point + platform adapters (WiFi, MQTT, flash, NTP, LED)
 - **`sink/`** — Python MQTT subscriber (validate, JSONL store, work orders) + config CLI
-- **`deploy/`** — Mosquitto Docker Compose
+- **`deploy/`** — Local Mosquitto Docker Compose (optional when using cloud broker)
+- **`scripts/deploy.sh`** — Deploy firmware to ESP32-S3 via `mpremote`
 - **`tools/virtual_device.py`** — CPython end-to-end demo without hardware
 
 ### MQTT Topics
@@ -22,7 +23,7 @@ ESP32-S3 MicroPython firmware simulates a Schaerer-style super-automatic espress
 
 See [CONTEXT.md](CONTEXT.md) and [docs/adr/](docs/adr/) for domain glossary and decisions.
 
-## Quick Start (Demo)
+## Quick Start
 
 ### 1. Install dependencies
 
@@ -32,35 +33,110 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Start Mosquitto broker
+Choose **local Mosquitto** (same LAN) or **HiveMQ Cloud** (corporate WiFi / VLAN split).
+
+---
+
+### Option A — Local broker (Docker)
+
+**Terminal 1 — broker**
 
 ```bash
 cd deploy && docker compose up -d
 ```
 
-### 3. Start the sink (terminal 1)
+**Terminal 2 — sink**
 
 ```bash
 python sink/subscriber.py --broker localhost
 ```
 
-### 4. Run virtual device (terminal 2)
+**Terminal 3 — virtual device (no hardware)**
 
 ```bash
 python tools/virtual_device.py --broker localhost --fast
 ```
 
-### 5. Push config / enable scaling (terminal 3)
+**Terminal 4 — push config**
 
 ```bash
-# Mild: enable scaling only
-python sink/cli.py --broker localhost --enable-scaling --publish-interval-s 5
-
-# Aggressive: all faults + anomalies, 100ms sample / 5s publish
 python sink/cli.py --broker localhost --aggressive
 ```
 
-The sink will open a work order when `scaling` appears in `active_faults` and close it when the fault clears.
+Device `secrets.py` for local use:
+
+```python
+MQTT_BROKER = "192.168.x.x"   # laptop IP on same LAN as ESP — not localhost
+MQTT_PORT = 1883
+MQTT_SSL = False
+MQTT_USER = None
+MQTT_PASSWORD = None
+```
+
+---
+
+### Option B — HiveMQ Cloud (recommended on corporate WiFi)
+
+When the ESP and laptop are on different VLANs (same SSID, different subnets), both connect to a cloud broker over the internet. See [ADR 0004](docs/adr/0004-hivemq-cloud-broker.md).
+
+**1. Create a cluster** at [console.hivemq.cloud](https://console.hivemq.cloud/) and note URL, username, and password.
+
+**2. Device credentials** — copy [firmware/secrets.example.py](firmware/secrets.example.py) to `secrets.py`:
+
+```python
+WIFI_SSID = "your-ssid"
+WIFI_PASSWORD = "your-password"
+
+MQTT_BROKER = "YOUR_CLUSTER.s1.eu.hivemq.cloud"
+MQTT_PORT = 8883
+MQTT_SSL = True
+MQTT_USER = "your-hivemq-username"
+MQTT_PASSWORD = "your-hivemq-password"
+```
+
+**3. Deploy to ESP32-S3**
+
+```bash
+./scripts/deploy.sh /dev/cu.usbmodem1101
+```
+
+**4. Run sink** (same broker + credentials)
+
+```bash
+python sink/subscriber.py \
+  --broker YOUR_CLUSTER.s1.eu.hivemq.cloud \
+  --port 8883 --tls \
+  --user YOUR_USER --password YOUR_PASS
+```
+
+**5. Push config downlink**
+
+```bash
+python sink/cli.py \
+  --broker YOUR_CLUSTER.s1.eu.hivemq.cloud \
+  --port 8883 --tls \
+  --user YOUR_USER --password YOUR_PASS \
+  --aggressive
+```
+
+Optional shell shortcuts:
+
+```bash
+export HIVEMQ_BROKER=YOUR_CLUSTER.s1.eu.hivemq.cloud
+export HIVEMQ_USER=your-user
+export HIVEMQ_PASS=your-pass
+
+python sink/subscriber.py --broker "$HIVEMQ_BROKER" --port 8883 --tls \
+  --user "$HIVEMQ_USER" --password "$HIVEMQ_PASS"
+```
+
+---
+
+### What to expect
+
+- Sink prints `[state] espresso-001 -> online` then `[telemetry]` every ~30s
+- Work orders open/close when `active_faults` change (with `--aggressive`)
+- Data files: `sink/data/telemetry.jsonl`, `state.jsonl`, `workorders.jsonl`
 
 ## Tests
 
@@ -68,14 +144,43 @@ The sink will open a work order when `scaling` appears in `active_faults` and cl
 pytest tests/ -v
 ```
 
-## Hardware (ESP32-S3)
+## Hardware (ESP32-S3 / Seeed XIAO)
 
-1. Flash MicroPython for ESP32-S3.
-2. Copy `core/`, `firmware/main.py`, `firmware/boot.py`, `firmware/config.json`, and `firmware/platform/` to the device.
-3. Copy `firmware/secrets.example.py` to `secrets.py` and set WiFi/MQTT credentials.
-4. Run `main.py` on boot.
+### One-time setup
 
-Config persists to `config.json` on flash; downlink commands via `sink/cli.py` apply at runtime.
+1. Flash [MicroPython for ESP32-S3](https://micropython.org/download/ESP32_GENERIC_S3/) (Seeed XIAO build).
+2. Copy `firmware/secrets.example.py` → `secrets.py` and set WiFi + MQTT (local or HiveMQ).
+3. Deploy everything:
+
+```bash
+./scripts/deploy.sh /dev/cu.usbmodem1101
+```
+
+The script copies `core/`, platform adapters (`wifi.py`, `mqtt.py`, `led.py`, …), `secrets.py`, and `main.py` last. Close Thonny/other serial apps first.
+
+### Status LED (orange, GPIO 21)
+
+| Pattern | State |
+|---------|--------|
+| 5 fast blinks at boot | Self-test |
+| Slow pulse | WiFi connecting |
+| Double blink | WiFi connected |
+| Medium blink | MQTT connecting |
+| Brief flash every ~2s | Running |
+| Fast blink | Active fault |
+| Long on / short off | WiFi/MQTT error |
+
+The **red LED** near USB is charge/power only — not firmware status.
+
+Configure in `secrets.py`: `LED_PIN`, `LED_ACTIVE_LOW`, `LED_ENABLED`.
+
+### WiFi troubleshooting
+
+MicroPython on ESP32 requires STA reset before scan/connect. If WiFi fails, use REPL steps in [firmware/wifi_debug.py](firmware/wifi_debug.py) or redeploy — `firmware/platform/wifi.py` handles this automatically.
+
+### Config downlink
+
+Runtime changes via MQTT (`sink/cli.py`) persist to `config.json` on flash.
 
 ## Data outputs
 

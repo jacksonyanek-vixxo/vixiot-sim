@@ -15,18 +15,22 @@ _epoch_offset = 0
 _boot_monotonic = 0
 
 
-def sync_ntp():
+def sync_ntp(tick_fn=None):
     global _epoch_offset, _boot_monotonic
     if time is None:
         return False
     _boot_monotonic = time.time()
+    if tick_fn:
+        tick_fn()
     if _HAS_NTP:
         try:
             ntptime.settime()
             _epoch_offset = 0
+            if tick_fn:
+                tick_fn()
             return True
-        except Exception:
-            pass
+        except Exception as e:
+            print("NTP: sync failed —", e)
     _epoch_offset = 1700000000
     return False
 

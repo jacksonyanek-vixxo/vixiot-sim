@@ -1,9 +1,6 @@
 """Layered irregularity engine: domain failures + generic signal anomalies."""
 
-try:
-    import random
-except ImportError:
-    random = None
+from core.rng import SeededRng
 
 DOMAIN_FAULTS = (
     "scaling",
@@ -27,7 +24,7 @@ class IrregularityEngine:
     """Apply configured failure patterns and signal anomalies to samples."""
 
     def __init__(self, config=None, seed=99):
-        self._rng = random.Random(seed) if random else None
+        self._rng = SeededRng(seed)
         self._config = {}
         self._active_domain = set()
         self._drift_offsets = {}

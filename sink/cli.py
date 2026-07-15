@@ -6,14 +6,15 @@ import json
 import sys
 from pathlib import Path
 
-import paho.mqtt.client as mqtt
-
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = ROOT / "firmware" / "config.json"
 AGGRESSIVE_CONFIG = ROOT / "firmware" / "config.aggressive.json"
 
+sys.path.insert(0, str(ROOT))
+from sink.mqtt_util import make_client, configure_client, connect_client
 
-def push_config(broker, port, device_id, config_path, overrides=None):
+
+def push_config(broker, port, device_id, config_path, overrides=None, username=None, password=None, tls=False):
     with open(config_path) as f:
         config = json.load(f)
     command = {"cmd": "set_config"}
@@ -30,9 +31,10 @@ def push_config(broker, port, device_id, config_path, overrides=None):
         if msg.topic == ack_topic:
             ack_received.append(json.loads(msg.payload.decode()))
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    client = make_client()
+    configure_client(client, username, password, tls)
     client.on_message = on_message
-    client.connect(broker, port, keepalive=60)
+    connect_client(client, broker, port)
     client.subscribe(ack_topic, qos=1)
     client.loop_start()
     client.publish(topic, json.dumps(command), qos=1)
@@ -51,6 +53,9 @@ def main():
     parser = argparse.ArgumentParser(description="Push config downlink to VixIoT device")
     parser.add_argument("--broker", default="localhost")
     parser.add_argument("--port", type=int, default=1883)
+    parser.add_argument("--tls", action="store_true", help="Use TLS (HiveMQ Cloud port 8883)")
+    parser.add_argument("--user", default=None)
+    parser.add_argument("--password", default=None)
     parser.add_argument("--device", default="espresso-001")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
     parser.add_argument("--aggressive", action="store_true", help="Use firmware/config.aggressive.json (all faults, fast intervals)")
@@ -68,7 +73,18 @@ def main():
     if args.publish_interval_s:
         overrides["publish_interval_s"] = args.publish_interval_s
 
-    sys.exit(push_config(args.broker, args.port, args.device, config_path, overrides or None))
+    sys.exit(
+        push_config(
+            args.broker,
+            args.port,
+            args.device,
+            config_path,
+            overrides or None,
+            username=args.user,
+            password=args.password,
+            tls=args.tls,
+        )
+    )
 
 
 if __name__ == "__main__":

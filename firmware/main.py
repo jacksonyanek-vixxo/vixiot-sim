@@ -11,6 +11,11 @@ except ImportError:
     import clock, mqtt, storage, wifi  # MicroPython: platform/*.py on device path
 
 try:
+    import led
+except ImportError:
+    led = None
+
+try:
     import secrets
 except ImportError:
     secrets = None
@@ -40,24 +45,88 @@ def _load_initial_config():
     return defaults or {"device_id": device_id}
 
 
+def _make_led():
+    if led is None:
+        return None
+    return led.create_from_secrets(secrets)
+
+
+def _tick_led(status_led):
+    if status_led:
+        status_led.tick()
+
+
+def _idle_blink(status_led, loop_ms=100):
+    """Keep blinking the status LED (e.g. after WiFi/MQTT failure)."""
+    while True:
+        _tick_led(status_led)
+        clock.sleep_ms(loop_ms)
+
+
+def _fail(status_led, state, message):
+    print("FATAL:", message)
+    if status_led and led:
+        status_led.set_state(state)
+        _idle_blink(status_led)
+
+
 def main():
+    status_led = _make_led()
+    if status_led:
+        status_led.self_test()
+        status_led.set_state(led.BOOT)
+
+    print("boot: loading config")
     cfg = _load_initial_config()
     runtime = DeviceRuntime(cfg)
     runtime.buffer.load_records(storage.load_buffer())
 
     if secrets:
-        wifi.connect(secrets.WIFI_SSID, secrets.WIFI_PASSWORD)
-    clock.sync_ntp()
+        print("boot: wifi connect", repr(secrets.WIFI_SSID))
+        if status_led:
+            status_led.set_state(led.WIFI_CONNECTING)
+        wifi_ok = wifi.connect(
+            secrets.WIFI_SSID,
+            secrets.WIFI_PASSWORD,
+            tick_fn=lambda: _tick_led(status_led),
+        )
+        if not wifi_ok:
+            _fail(status_led, led.ERROR, "WiFi connect failed")
+            return
+        print("boot: wifi ok")
+        try:
+            import network
+            print("boot: ip", network.WLAN(network.STA_IF).ifconfig())
+        except Exception:
+            pass
+        if status_led:
+            status_led.set_state(led.WIFI_OK)
+            for _ in range(8):
+                _tick_led(status_led)
+                clock.sleep_ms(50)
+    elif status_led:
+        status_led.set_state(led.WIFI_OK)
+
+    print("boot: ntp sync")
+    clock.sync_ntp(tick_fn=lambda: _tick_led(status_led))
 
     device_id = runtime.config["device_id"]
     topics = _topics(device_id)
+    broker = getattr(secrets, "MQTT_BROKER", "localhost") if secrets else "localhost"
+    port = getattr(secrets, "MQTT_PORT", 1883) if secrets else 1883
+    use_ssl = getattr(secrets, "MQTT_SSL", port == 8883) if secrets else False
+    print("boot: mqtt broker", broker, port, "ssl=", use_ssl)
+
+    if status_led:
+        status_led.set_state(led.MQTT_CONNECTING)
 
     client = mqtt.MqttClient(
         device_id,
-        getattr(secrets, "MQTT_BROKER", "localhost") if secrets else "localhost",
-        port=getattr(secrets, "MQTT_PORT", 1883) if secrets else 1883,
+        broker,
+        port=port,
         user=getattr(secrets, "MQTT_USER", None) if secrets else None,
         password=getattr(secrets, "MQTT_PASSWORD", None) if secrets else None,
+        ssl=use_ssl,
     )
 
     def on_cmd(topic, msg):
@@ -77,19 +146,44 @@ def main():
     client.set_callback(on_cmd)
     birth = json.dumps(build_state_message(device_id, "online", clock.now_iso()))
     lwt = json.dumps(build_state_message(device_id, "offline", clock.now_iso()))
-    client.connect(lwt_topic=topics["state"], lwt_payload=lwt)
+    mqtt_ok = client.connect(
+        lwt_topic=topics["state"],
+        lwt_payload=lwt,
+        tick_fn=lambda: _tick_led(status_led),
+        sleep_fn=clock.sleep_ms,
+    )
+    if not mqtt_ok:
+        _fail(status_led, led.ERROR, "MQTT connect failed — check broker, port, SSL, credentials")
+        return
+
     client.subscribe(topics["cmd"])
     client.publish(topics["state"], birth, retain=True, qos=1)
+    print("boot: online — simulation running")
+
+    if status_led:
+        status_led.set_state(led.RUNNING)
 
     loop_ms = 100
+    pub_count = 0
     while True:
+        _tick_led(status_led)
         client.check_msg()
         messages = runtime.tick(loop_ms, clock.now_iso())
+        faults = runtime.irregularities.active_faults()
+        if status_led:
+            if faults:
+                status_led.set_state(led.FAULT)
+            elif status_led.state == led.FAULT:
+                status_led.set_state(led.RUNNING)
         for payload in messages:
             def _pub(p, c=client, t=topics["telemetry"]):
                 c.publish(t, json.dumps(p), qos=1)
             runtime.enqueue_or_publish(payload, _pub)
             storage.save_buffer(runtime.buffer.dump_records())
+            pub_count += 1
+            if pub_count <= 3 or pub_count % 10 == 0:
+                print("pub seq=%s event=%s faults=%s" % (
+                    payload.get("seq"), payload.get("event"), payload.get("active_faults")))
         clock.sleep_ms(loop_ms)
 
 
