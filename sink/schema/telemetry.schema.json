@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "VixIoT Telemetry",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "device_id",
+    "equipment_type",
+    "timestamp",
+    "seq",
+    "event",
+    "metrics",
+    "counters",
+    "state",
+    "active_faults"
+  ],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "device_id": { "type": "string" },
+    "equipment_type": { "type": "string" },
+    "timestamp": { "type": "string" },
+    "seq": { "type": "integer" },
+    "event": { "type": "string", "enum": ["telemetry", "exception"] },
+    "window": {
+      "type": "object",
+      "properties": {
+        "start": { "type": "string" },
+        "end": { "type": "string" },
+        "sample_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "number" },
+          "unit": { "type": "string" },
+          "min": { "type": "number" },
+          "max": { "type": "number" },
+          "mean": { "type": "number" },
+          "quality": { "type": "string", "enum": ["good", "suspect", "bad", "missing"] }
+        }
+      }
+    },
+    "counters": {
+      "type": "object",
+      "required": ["total_shots", "shots_since_descale", "operating_hours"],
+      "properties": {
+        "total_shots": { "type": "integer" },
+        "shots_since_descale": { "type": "integer" },
+        "operating_hours": { "type": "number" }
+      }
+    },
+    "state": { "type": "string" },
+    "active_faults": { "type": "array", "items": { "type": "string" } }
+  }
+}
