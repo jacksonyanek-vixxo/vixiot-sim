@@ -9,16 +9,20 @@ DEFAULT_WO_PATH = Path(__file__).parent / "data" / "workorders.jsonl"
 
 
 class WorkOrderManager:
-    def __init__(self, publish_fn=None, persist_path=None):
+    def __init__(self, publish_fn=None, persist_path=None, persist=True):
         self._open = {}
         self._publish = publish_fn
         self._path = Path(persist_path) if persist_path else DEFAULT_WO_PATH
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._persist_enabled = persist
+        if self._persist_enabled:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
 
     def _now(self):
         return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _persist(self, record):
+        if not self._persist_enabled:
+            return
         with open(self._path, "a") as f:
             f.write(json.dumps(record) + "\n")
 

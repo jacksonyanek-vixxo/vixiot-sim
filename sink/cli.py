@@ -12,16 +12,16 @@ AGGRESSIVE_CONFIG = ROOT / "firmware" / "config.aggressive.json"
 
 sys.path.insert(0, str(ROOT))
 from sink.mqtt_util import make_client, configure_client, connect_client
+from sink.hub import build_set_config
 
 
 def push_config(broker, port, device_id, config_path, overrides=None, username=None, password=None, tls=False):
     with open(config_path) as f:
         config = json.load(f)
-    command = {"cmd": "set_config"}
-    command.update(config)
+    command_config = dict(config)
     if overrides:
-        command.update(overrides)
-    command["device_id"] = device_id
+        command_config.update(overrides)
+    command = build_set_config(device_id, command_config)
 
     topic = "vixiot/%s/cmd" % device_id
     ack_topic = "vixiot/%s/cmd/ack" % device_id
