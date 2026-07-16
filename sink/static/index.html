@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VixIoT Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script defer src="/static/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+</head>
+<body>
+  <main x-data="dashboard" x-init="init()">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">VixIoT simulator</p>
+        <h1>Equipment dashboard</h1>
+      </div>
+      <label class="device-picker">Device
+        <select x-model="selectedId" @change="selectDevice()">
+          <option value="">Waiting for a device…</option>
+          <template x-for="device in devices" :key="device.device_id">
+            <option :value="device.device_id" x-text="device.device_id"></option>
+          </template>
+        </select>
+      </label>
+    </header>
+
+    <p class="banner error" x-show="error" x-text="error"></p>
+    <p class="banner success" x-show="notice" x-text="notice"></p>
+
+    <section class="status-grid">
+      <article class="status-card">
+        <span class="status-dot" :class="{online: snapshot.online}"></span>
+        <div><small>Connection</small><strong x-text="snapshot.connection_status || 'unknown'"></strong></div>
+      </article>
+      <article class="status-card"><div><small>Machine state</small><strong x-text="snapshot.state || '—'"></strong></div></article>
+      <article class="status-card"><div><small>Total shots</small><strong x-text="counter('total_shots')"></strong></div></article>
+      <article class="status-card"><div><small>Operating hours</small><strong x-text="counter('operating_hours')"></strong></div></article>
+      <article class="status-card pm-card">
+        <div><small>Shots since descale</small><strong x-text="counter('shots_since_descale')"></strong></div>
+        <div class="progress"><span :style="`width:${pmProgress()}%`"></span></div>
+      </article>
+    </section>
+
+    <section class="chart-grid">
+      <article class="panel"><h2>Temperatures</h2><canvas id="temperatureChart"></canvas></article>
+      <article class="panel"><h2>Brew pressure</h2><canvas id="pressureChart"></canvas></article>
+      <article class="panel"><h2>Water flow</h2><canvas id="flowChart"></canvas></article>
+      <article class="panel"><h2>Currents</h2><canvas id="currentChart"></canvas></article>
+    </section>
+
+    <section class="lower-grid">
+      <article class="panel">
+        <h2>Active faults <span class="count" x-text="activeFaults.length"></span></h2>
+        <div class="empty" x-show="!activeFaults.length">No active faults</div>
+        <template x-for="fault in activeFaults" :key="fault">
+          <div class="fault">
+            <strong x-text="label(fault)"></strong>
+            <span x-text="severity(fault)"></span>
+          </div>
+        </template>
+      </article>
+
+      <article class="panel workorders">
+        <h2>Work orders</h2>
+        <div class="empty" x-show="!allWorkorders().length">No work orders</div>
+        <template x-for="order in allWorkorders()" :key="order.wo_id + order.status">
+          <div class="workorder">
+            <span class="badge" :class="order.status" x-text="order.status"></span>
+            <div>
+              <strong x-text="label(order.fault)"></strong>
+              <small x-text="formatTime(order.closed_at || order.opened_at)"></small>
+            </div>
+            <span x-text="order.severity"></span>
+          </div>
+        </template>
+      </article>
+    </section>
+
+    <section class="panel config-panel">
+      <div class="panel-heading">
+        <div><h2>Configuration & fault injection</h2><p>Changes are published as a set_config command.</p></div>
+        <div class="preset-buttons">
+          <button class="secondary" @click="healthyPreset()">Healthy</button>
+          <button class="secondary" @click="aggressivePreset()">Aggressive</button>
+          <button @click="applyConfig()" :disabled="!selectedId || saving" x-text="saving ? 'Applying…' : 'Apply'"></button>
+        </div>
+      </div>
+      <div class="intervals">
+        <label>Sample interval (ms)<input type="number" min="10" x-model.number="config.sample_interval_ms"></label>
+        <label>Publish interval (s)<input type="number" min="1" x-model.number="config.publish_interval_s"></label>
+      </div>
+      <div class="fault-table">
+        <div class="fault-row fault-header"><span>Fault</span><span>Enabled</span><span>Severity</span><span>Rate / MTBF</span></div>
+        <template x-for="name in faultNames" :key="name">
+          <div class="fault-row">
+            <strong x-text="label(name)"></strong>
+            <input type="checkbox" x-model="config.irregularities[name].enabled">
+            <label class="range"><input type="range" min="0" max="1" step="0.05" x-model.number="config.irregularities[name].severity"><span x-text="Number(config.irregularities[name].severity).toFixed(2)"></span></label>
+            <label><span x-text="isDomain(name) ? 'MTBF h' : 'rate/h'"></span><input type="number" min="0" step="0.01" x-model.number="config.irregularities[name][rateKey(name)]"></label>
+          </div>
+        </template>
+      </div>
+      <p class="ack" x-show="lastAck" :class="{failed: lastAck && !lastAck.success}">
+        Device acknowledgement: <span x-text="lastAck ? (lastAck.message || (lastAck.success ? 'success' : 'failed')) : ''"></span>
+      </p>
+    </section>
+  </main>
+</body>
+</html>

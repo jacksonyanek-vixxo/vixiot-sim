@@ -144,6 +144,43 @@ python sink/subscriber.py --broker "$HIVEMQ_BROKER" --port 8883 --tls \
 pytest tests/ -v
 ```
 
+## Web UI
+
+The FastAPI dashboard replaces the headless sink when it is running: it owns the
+MQTT connection, persists the same JSONL records, manages work orders, and
+streams live data to the browser. Do not run `sink/subscriber.py` at the same
+time unless you intentionally want a second sink.
+
+For local Mosquitto:
+
+```bash
+uvicorn sink.app:app --host 127.0.0.1 --port 8000
+```
+
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). The dashboard discovers
+devices from wildcard MQTT topics and provides live charts, status, faults,
+work orders, and config/fault-injection controls.
+
+For HiveMQ Cloud, configure the MQTT connection through environment variables:
+
+```bash
+export VIXIOT_BROKER=YOUR_CLUSTER.s1.eu.hivemq.cloud
+export VIXIOT_MQTT_PORT=8883
+export VIXIOT_MQTT_TLS=true
+export VIXIOT_MQTT_USER=YOUR_USER
+export VIXIOT_MQTT_PASSWORD=YOUR_PASSWORD
+uvicorn sink.app:app --host 127.0.0.1 --port 8000
+```
+
+The equivalent CLI form supports the same broker options:
+
+```bash
+python -m sink.app --broker localhost --port 1883 --web-port 8000
+```
+
+The web server binds only to `127.0.0.1` by default and has no authentication.
+See [ADR 0005](docs/adr/0005-web-backend-absorbs-sink.md).
+
 ## Hardware (ESP32-S3 / Seeed XIAO)
 
 ### One-time setup
