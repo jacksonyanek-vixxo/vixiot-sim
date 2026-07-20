@@ -2,6 +2,76 @@ const DOMAIN_FAULTS = ["scaling", "grinder_wear", "pump_degradation", "clogged_g
 const GENERIC_FAULTS = ["spike", "drift", "stuck", "dropout", "out_of_range", "noise"];
 const FAULTS = [...DOMAIN_FAULTS, ...GENERIC_FAULTS];
 const QUALITY_COLORS = { good: "#2dd4bf", suspect: "#f59e0b", bad: "#ef4444", missing: "#64748b" };
+const QUALITY_LABELS = { good: "Good", suspect: "Suspect", bad: "Bad", missing: "Missing" };
+
+const METRIC_SPECS = {
+  brew_boiler_temp: { unit: "degC", label: "Brew boiler", healthy: [91, 94], group: "temperature" },
+  steam_boiler_temp: { unit: "degC", label: "Steam boiler", healthy: [125, 135], group: "temperature" },
+  ambient_temp: { unit: "degC", label: "Ambient", healthy: [18, 28], group: "temperature" },
+  brew_pressure: { unit: "bar", label: "Brew pressure", healthy: [8.5, 9.5], group: "pressure" },
+  water_flow: { unit: "ml_s", label: "Water flow", healthy: [0, 12], group: "flow" },
+  pump_current: { unit: "A", label: "Pump", healthy: [0.5, 1.8], group: "current" },
+  grinder_current: { unit: "A", label: "Grinder", healthy: [1.5, 3.5], group: "current" },
+};
+
+const PM_BANDS = { descale_due_shots: 500, burr_replace_shots: 15000, pm_service_hours: 2000 };
+
+const METRIC_TILES = [
+  "brew_boiler_temp", "steam_boiler_temp", "brew_pressure", "water_flow",
+  "pump_current", "grinder_current", "ambient_temp",
+];
+
+const CHART_SPECS = {
+  temperatureChart: {
+    title: "Temperatures",
+    desc: "Boiler and ambient heat — steady brew temp is critical for extraction quality.",
+    unit: "degC",
+    metrics: [["brew_boiler_temp", "Brew boiler"], ["steam_boiler_temp", "Steam boiler"], ["ambient_temp", "Ambient"]],
+    bandMetric: "brew_boiler_temp",
+  },
+  pressureChart: {
+    title: "Brew pressure",
+    desc: "Extraction pressure during a shot — target ~9 bar while brewing.",
+    unit: "bar",
+    metrics: [["brew_pressure", "Pressure"]],
+    bandMetric: "brew_pressure",
+  },
+  flowChart: {
+    title: "Water flow",
+    desc: "Flow rate through the group head — spikes during active brewing.",
+    unit: "ml_s",
+    metrics: [["water_flow", "Flow"]],
+    bandMetric: "water_flow",
+  },
+  currentChart: {
+    title: "Motor currents",
+    desc: "Pump and grinder draw — unusual spikes can indicate wear or blockage.",
+    unit: "A",
+    metrics: [["pump_current", "Pump"], ["grinder_current", "Grinder"]],
+    bandMetric: "pump_current",
+  },
+};
+
+const healthyBandPlugin = {
+  id: "healthyBand",
+  beforeDatasetsDraw(chart, _args, options) {
+    const band = options?.band;
+    const { ctx, chartArea, scales } = chart;
+    if (!band || !chartArea || chartArea.width <= 0 || chartArea.height <= 0) return;
+    const yScale = scales.y;
+    if (!yScale) return;
+    const top = yScale.getPixelForValue(band[1]);
+    const bottom = yScale.getPixelForValue(band[0]);
+    ctx.save();
+    ctx.fillStyle = options.color || "rgba(45, 212, 191, 0.1)";
+    ctx.fillRect(chartArea.left, top, chartArea.right - chartArea.left, bottom - top);
+    ctx.strokeStyle = options.borderColor || "rgba(45, 212, 191, 0.35)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.strokeRect(chartArea.left, top, chartArea.right - chartArea.left, bottom - top);
+    ctx.restore();
+  },
+};
 
 function initialFaults() {
   return Object.fromEntries(FAULTS.map(name => [name, {
@@ -9,6 +79,17 @@ function initialFaults() {
     severity: 0.5,
     [DOMAIN_FAULTS.includes(name) ? "mtbf_hours" : "rate_per_hour"]: DOMAIN_FAULTS.includes(name) ? 200 : 1,
   }]));
+}
+
+function formatUnit(unit) {
+  return ({ degC: "°C", bar: "bar", ml_s: "ml/s", A: "A" })[unit] || unit;
+}
+
+function healthyHint(metricKey) {
+  const spec = METRIC_SPECS[metricKey];
+  if (!spec?.healthy) return "";
+  const [lo, hi] = spec.healthy;
+  return `${lo}–${hi} ${formatUnit(spec.unit)}`;
 }
 
 document.addEventListener("alpine:init", () => {
@@ -20,6 +101,9 @@ document.addEventListener("alpine:init", () => {
     workorders: { open: [], closed: [] },
     config: { sample_interval_ms: 1000, publish_interval_s: 30, irregularities: initialFaults() },
     faultNames: FAULTS,
+    metricTiles: METRIC_TILES,
+    chartSpecs: CHART_SPECS,
+    qualityLegend: Object.entries(QUALITY_LABELS).map(([key, label]) => ({ key, label, color: QUALITY_COLORS[key] })),
     charts: {},
     socket: null,
     reconnectTimer: null,
@@ -29,8 +113,13 @@ document.addEventListener("alpine:init", () => {
     saving: false,
 
     async init() {
-      await new Promise(resolve => setTimeout(resolve, 0));
-      this.createCharts();
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      try {
+        this.createCharts();
+      } catch (error) {
+        this.error = `Chart setup failed: ${error.message}`;
+        console.error(error);
+      }
       await this.loadDevices();
       this.connectSocket();
     },
@@ -190,28 +279,100 @@ document.addEventListener("alpine:init", () => {
     },
 
     createCharts() {
-      const specs = {
-        temperatureChart: [["brew_boiler_temp", "Brew boiler"], ["steam_boiler_temp", "Steam boiler"], ["ambient_temp", "Ambient"]],
-        pressureChart: [["brew_pressure", "Pressure"]],
-        flowChart: [["water_flow", "Flow"]],
-        currentChart: [["pump_current", "Pump"], ["grinder_current", "Grinder"]],
-      };
-      const palette = ["#38bdf8", "#a78bfa", "#2dd4bf"];
-      for (const [elementId, metrics] of Object.entries(specs)) {
-        this.charts[elementId] = new Chart(document.getElementById(elementId), {
+      if (typeof Chart === "undefined") throw new Error("Chart.js did not load");
+      if (!Chart.registry.plugins.get("healthyBand")) Chart.register(healthyBandPlugin);
+
+      const palette = ["#38bdf8", "#a78bfa", "#2dd4bf", "#f472b6"];
+      for (const [elementId, spec] of Object.entries(CHART_SPECS)) {
+        const bandMetric = spec.bandMetric;
+        const healthy = METRIC_SPECS[bandMetric]?.healthy;
+        const unitLabel = formatUnit(spec.unit);
+        const canvas = document.getElementById(elementId);
+        if (!canvas) throw new Error(`Missing chart canvas: ${elementId}`);
+
+        this.charts[elementId] = new Chart(canvas, {
           type: "line",
-          data: { labels: [], datasets: metrics.map(([key, label], index) => ({
-            key, label, data: [], borderColor: palette[index], borderWidth: 2, pointRadius: 2,
-            pointBackgroundColor: context => QUALITY_COLORS[context.raw?.quality] || palette[index],
-            parsing: { yAxisKey: "value" }, tension: 0.25, spanGaps: true,
-          })) },
+          data: {
+            labels: [],
+            datasets: spec.metrics.map(([key, label], index) => ({
+              key,
+              label,
+              data: [],
+              _qualities: [],
+              _windows: [],
+              borderColor: palette[index % palette.length],
+              backgroundColor: palette[index % palette.length] + "22",
+              borderWidth: 2,
+              pointRadius: 3,
+              pointHoverRadius: 5,
+              pointBackgroundColor: context => {
+                const quality = context.dataset._qualities?.[context.dataIndex];
+                return QUALITY_COLORS[quality] || palette[index % palette.length];
+              },
+              pointBorderColor: "#0f172a",
+              pointBorderWidth: 1,
+              tension: 0.25,
+              spanGaps: true,
+            })),
+          },
           options: {
-            animation: false, responsive: true, maintainAspectRatio: false,
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: false,
             interaction: { mode: "index", intersect: false },
-            plugins: { legend: { labels: { color: "#cbd5e1" } } },
+            plugins: {
+              legend: {
+                position: "top",
+                align: "end",
+                labels: { color: "#cbd5e1", boxWidth: 10, boxHeight: 10, padding: 14, font: { size: 11 } },
+              },
+              healthyBand: {
+                band: healthy,
+                color: "rgba(45, 212, 191, 0.08)",
+                borderColor: "rgba(45, 212, 191, 0.3)",
+              },
+              tooltip: {
+                backgroundColor: "#0f172a",
+                borderColor: "#334155",
+                borderWidth: 1,
+                titleColor: "#e2e8f0",
+                bodyColor: "#cbd5e1",
+                footerColor: "#94a3b8",
+                padding: 12,
+                callbacks: {
+                  title: items => items[0]?.label || "",
+                  label: context => {
+                    const value = context.parsed.y;
+                    if (value == null) return `${context.dataset.label}: no data`;
+                    const unit = formatUnit(METRIC_SPECS[context.dataset.key]?.unit || spec.unit);
+                    const quality = context.dataset._qualities?.[context.dataIndex] || "missing";
+                    return `${context.dataset.label}: ${value} ${unit} (${QUALITY_LABELS[quality] || quality})`;
+                  },
+                  afterBody: items => {
+                    const lines = [];
+                    for (const item of items) {
+                      const window = item.dataset._windows?.[item.dataIndex];
+                      if (!window) continue;
+                      const unit = formatUnit(METRIC_SPECS[item.dataset.key]?.unit || spec.unit);
+                      lines.push(`${item.dataset.label} window: min ${window.min}, max ${window.max}, avg ${window.mean} ${unit}`);
+                    }
+                    return lines;
+                  },
+                  footer: () => healthy ? `Healthy band: ${healthy[0]}-${healthy[1]} ${unitLabel}` : "",
+                },
+              },
+            },
             scales: {
-              x: { ticks: { color: "#64748b", maxTicksLimit: 6 }, grid: { color: "#1e293b" } },
-              y: { ticks: { color: "#64748b" }, grid: { color: "#1e293b" } },
+              x: {
+                ticks: { color: "#64748b", maxTicksLimit: 6, font: { size: 10 } },
+                grid: { color: "#1e293b" },
+                title: { display: true, text: "Time", color: "#64748b", font: { size: 10, weight: 600 } },
+              },
+              y: {
+                ticks: { color: "#64748b", font: { size: 10 } },
+                grid: { color: "#1e293b" },
+                title: { display: true, text: unitLabel, color: "#64748b", font: { size: 10, weight: 600 } },
+              },
             },
           },
         });
@@ -219,13 +380,16 @@ document.addEventListener("alpine:init", () => {
     },
 
     refreshCharts() {
+      if (!Object.keys(this.charts).length) return;
       const records = this.history.slice(-100);
       for (const chart of Object.values(this.charts)) {
         chart.data.labels = records.map(item => this.formatTime(item.timestamp));
         for (const dataset of chart.data.datasets) {
-          dataset.data = records.map(item => {
+          dataset.data = records.map(item => item.metrics?.[dataset.key]?.value ?? null);
+          dataset._qualities = records.map(item => item.metrics?.[dataset.key]?.quality || "missing");
+          dataset._windows = records.map(item => {
             const metric = item.metrics?.[dataset.key];
-            return { value: metric?.value ?? null, quality: metric?.quality || "missing" };
+            return metric?.min != null ? { min: metric.min, max: metric.max, mean: metric.mean } : null;
           });
         }
         chart.update("none");
@@ -233,13 +397,88 @@ document.addEventListener("alpine:init", () => {
     },
 
     get activeFaults() { return this.snapshot.active_faults || []; },
+    get latestRecord() { return this.history.length ? this.history[this.history.length - 1] : null; },
+
     counter(name) { return this.snapshot.counters?.[name] ?? "—"; },
-    pmProgress() { return Math.min(100, ((this.snapshot.counters?.shots_since_descale || 0) / 1000) * 100); },
+
+    metric(key) {
+      const reading = this.latestRecord?.metrics?.[key] || this.snapshot.metrics?.[key];
+      return reading || null;
+    },
+
+    metricValue(key) {
+      const reading = this.metric(key);
+      if (!reading || reading.value == null) return "—";
+      const unit = formatUnit(reading.unit || METRIC_SPECS[key]?.unit);
+      return `${reading.value} ${unit}`;
+    },
+
+    metricQuality(key) {
+      return this.metric(key)?.quality || "missing";
+    },
+
+    metricLabel(key) { return METRIC_SPECS[key]?.label || this.label(key); },
+
+    metricHealthy(key) { return healthyHint(key); },
+
+    pmProgress() {
+      const shots = this.snapshot.counters?.shots_since_descale || 0;
+      return Math.min(100, (shots / PM_BANDS.descale_due_shots) * 100);
+    },
+
+    pmLabel() {
+      const shots = this.snapshot.counters?.shots_since_descale ?? "—";
+      return `${shots} / ${PM_BANDS.descale_due_shots} shots`;
+    },
+
+    pmDue() {
+      return (this.snapshot.counters?.shots_since_descale || 0) >= PM_BANDS.descale_due_shots;
+    },
+
+    pmAdvisories() {
+      const advisories = [];
+      const counters = this.snapshot.counters || {};
+      if ((counters.shots_since_descale || 0) >= PM_BANDS.descale_due_shots) advisories.push("Descale due");
+      if ((counters.total_shots || 0) >= PM_BANDS.burr_replace_shots) advisories.push("Burr replace due");
+      if ((counters.operating_hours || 0) >= PM_BANDS.pm_service_hours) advisories.push("PM service due");
+      return advisories;
+    },
+
+    windowInfo() {
+      const window = this.latestRecord?.window;
+      if (!window?.sample_count) return "";
+      return `Window: ${window.sample_count} samples`;
+    },
+
+    stateClass() {
+      const state = this.snapshot.state || "unknown";
+      return `state-${state}`;
+    },
+
+    severityBadge(value) {
+      const num = Number(value);
+      if (num >= 0.75) return "critical";
+      if (num >= 0.4) return "warning";
+      return "info";
+    },
+
     severity(name) { return Number(this.config.irregularities?.[name]?.severity ?? 0).toFixed(2); },
     isDomain(name) { return DOMAIN_FAULTS.includes(name); },
     rateKey(name) { return this.isDomain(name) ? "mtbf_hours" : "rate_per_hour"; },
     label(name) { return String(name || "").replaceAll("_", " ").replace(/\b\w/g, char => char.toUpperCase()); },
-    formatTime(value) { return value ? new Date(value).toLocaleString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"; },
+    formatTime(value) {
+      return value ? new Date(value).toLocaleString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
+    },
+    formatDateTime(value) {
+      return value ? new Date(value).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
+    },
     allWorkorders() { return [...this.workorders.open, ...this.workorders.closed].slice(0, 30); },
+    openWorkorderCount() { return this.workorders.open?.length || 0; },
+    chartHealthyHint(chartId) {
+      const spec = CHART_SPECS[chartId];
+      if (!spec) return "";
+      if (spec.metrics.length === 1) return `Healthy: ${healthyHint(spec.metrics[0][0])}`;
+      return spec.metrics.map(([key]) => `${METRIC_SPECS[key]?.label}: ${healthyHint(key)}`).join(" · ");
+    },
   }));
 });
