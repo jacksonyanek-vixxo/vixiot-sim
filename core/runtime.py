@@ -4,9 +4,10 @@ from core.aggregation import Aggregator, should_report_by_exception
 from core.buffer import StoreForwardBuffer
 from core.config import normalize_config, apply_set_config
 from core.espresso import EspressoMachine
+from core.events import EventEngine
 from core.irregularities import IrregularityEngine
 from core.scheduler import Scheduler
-from core.schema import build_telemetry, build_cmd_ack
+from core.schema import build_telemetry, build_cmd_ack, build_event
 
 
 class DeviceRuntime:
@@ -16,6 +17,7 @@ class DeviceRuntime:
         self.config = normalize_config(config)
         self.machine = EspressoMachine(seed=seed)
         self.irregularities = IrregularityEngine(self.config, seed=seed + 1)
+        self.events = EventEngine(self.config, seed=seed + 2)
         self.aggregator = Aggregator(list(self.machine.sample().keys()))
         self.scheduler = Scheduler(
             self.config["sample_interval_ms"],
@@ -23,6 +25,7 @@ class DeviceRuntime:
         )
         self.buffer = StoreForwardBuffer()
         self.seq = 0
+        self._event_seq = 0
         self._prev_faults = []
         self._prev_state = "idle"
         self.aggregator.reset_window()
@@ -30,6 +33,7 @@ class DeviceRuntime:
     def apply_config(self, command):
         self.config = apply_set_config(self.config, command)
         self.irregularities.update_config(self.config)
+        self.events.update_config(self.config)
         self.scheduler.update_intervals(
             self.config["sample_interval_ms"],
             self.config["publish_interval_s"],
@@ -47,6 +51,45 @@ class DeviceRuntime:
         processed = self.irregularities.apply(raw, dt)
         self.aggregator.add_sample(processed, timestamp)
         return processed
+
+    def collect_events(self, timestamp, dt_seconds=None):
+        dt = dt_seconds or self.config["sample_interval_ms"] / 1000.0
+        faults = self._collect_faults()
+        occurrences = self.events.step(
+            dt,
+            self.machine.state,
+            self.machine.counters,
+            faults,
+        )
+        payloads = []
+        for occurrence in occurrences:
+            self._event_seq += 1
+            payloads.append(
+                build_event(
+                    device_id=self.config["device_id"],
+                    seq=self._event_seq,
+                    timestamp=timestamp,
+                    event_obj=occurrence,
+                )
+            )
+        return payloads
+
+    def build_connectivity_events(self, timestamp, connected):
+        occurrences = [self.events.connectivity_event(connected)]
+        payloads = []
+        for occurrence in occurrences:
+            if not occurrence:
+                continue
+            self._event_seq += 1
+            payloads.append(
+                build_event(
+                    device_id=self.config["device_id"],
+                    seq=self._event_seq,
+                    timestamp=timestamp,
+                    event_obj=occurrence,
+                )
+            )
+        return payloads
 
     def build_publish(self, timestamp, event="telemetry"):
         """Build a telemetry payload and reset the aggregation window."""
@@ -80,8 +123,11 @@ class DeviceRuntime:
         """Advance scheduler; sample and maybe publish."""
         should_sample, should_publish = self.scheduler.tick(elapsed_ms)
         messages = []
+        event_messages = []
+        dt = self.config["sample_interval_ms"] / 1000.0
         if should_sample:
-            self.sample_once(timestamp)
+            self.sample_once(timestamp, dt)
+            event_messages.extend(self.collect_events(timestamp, dt))
         if should_publish:
             messages.append(self.build_publish(timestamp))
         else:
@@ -91,7 +137,7 @@ class DeviceRuntime:
                 self._prev_faults, faults, self._prev_state, self.machine.state, metrics
             ):
                 messages.append(self.build_publish(timestamp))
-        return messages
+        return messages, event_messages
 
     def handle_command(self, command):
         try:

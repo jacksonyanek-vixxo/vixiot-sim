@@ -12,8 +12,10 @@ from sink.workorders import WorkOrderManager
 
 ROOT = Path(__file__).resolve().parent
 SCHEMA_PATH = ROOT / "schema" / "telemetry.schema.json"
+EVENT_SCHEMA_PATH = ROOT / "schema" / "event.schema.json"
 DATA_DIR = ROOT / "data"
 TELEMETRY_PATH = DATA_DIR / "telemetry.jsonl"
+EVENTS_PATH = DATA_DIR / "events.jsonl"
 STATE_PATH = DATA_DIR / "state.jsonl"
 
 
@@ -51,6 +53,7 @@ class SinkHub:
         tls=False,
         client=None,
         telemetry_path=TELEMETRY_PATH,
+        events_path=EVENTS_PATH,
         state_path=STATE_PATH,
         workorder_path=None,
         persist=True,
@@ -61,12 +64,15 @@ class SinkHub:
         self.port = port
         self.device_filter = device_filter
         self.schema = load_schema()
+        self.event_schema = load_schema(EVENT_SCHEMA_PATH)
         self.telemetry_path = Path(telemetry_path)
+        self.events_path = Path(events_path)
         self.state_path = Path(state_path)
         self.persist = persist
         self._broadcast = broadcast
         self._lock = threading.RLock()
         self._history = defaultdict(lambda: deque(maxlen=history_size))
+        self._event_history = defaultdict(lambda: deque(maxlen=history_size))
         self._snapshots = {}
         self._states = {}
         self._configs = {}
@@ -113,6 +119,7 @@ class SinkHub:
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
         print("[sink] connected to %s:%s" % (self.broker, self.port))
         client.subscribe("vixiot/+/telemetry", qos=1)
+        client.subscribe("vixiot/+/event", qos=1)
         client.subscribe("vixiot/+/state", qos=1)
         client.subscribe("vixiot/+/cmd/ack", qos=1)
 
@@ -136,6 +143,8 @@ class SinkHub:
             self.ingest_state(device_id, payload)
         elif channel == "telemetry":
             self.ingest_telemetry(device_id, payload)
+        elif channel == "event":
+            self.ingest_event(device_id, payload)
         elif channel == "cmd/ack":
             self.ingest_ack(device_id, payload)
 
@@ -175,6 +184,36 @@ class SinkHub:
             )
         )
         self._emit("telemetry", device_id, record)
+        return True
+
+    def ingest_event(self, device_id, payload):
+        try:
+            jsonschema.validate(payload, self.event_schema)
+        except jsonschema.ValidationError as error:
+            print("[sink] event schema validation failed: %s" % error)
+            return False
+        if payload.get("device_id") != device_id:
+            print("[sink] event device_id does not match topic: %s" % device_id)
+            return False
+
+        record = dict(payload)
+        with self._lock:
+            self._event_history[device_id].append(record)
+        if self.persist:
+            append_jsonl(self.events_path, record)
+        self._wo.process_event(record)
+        event = record.get("event", {})
+        print(
+            "[event] %s seq=%s %s %s module=%s"
+            % (
+                device_id,
+                record.get("seq"),
+                event.get("name"),
+                event.get("transition"),
+                event.get("module"),
+            )
+        )
+        self._emit("event", device_id, record)
         return True
 
     def ingest_ack(self, device_id, payload):
@@ -242,6 +281,10 @@ class SinkHub:
         with self._lock:
             return list(self._history.get(device_id, ()))
 
+    def events(self, device_id):
+        with self._lock:
+            return list(self._event_history.get(device_id, ()))
+
     def workorders(self, device_id):
         with self._lock:
             orders = self._workorders.get(device_id)
@@ -257,6 +300,7 @@ class SinkHub:
             device["device_id"]: {
                 "snapshot": self.snapshot(device["device_id"]),
                 "telemetry": self.telemetry(device["device_id"]),
+                "events": self.events(device["device_id"]),
                 "workorders": self.workorders(device["device_id"]),
             }
             for device in self.devices()
@@ -276,7 +320,7 @@ class SinkHub:
     def run(self):
         self.connect()
         print(
-            "[sink] listening on vixiot/+/telemetry, vixiot/+/state, "
+            "[sink] listening on vixiot/+/telemetry, vixiot/+/event, vixiot/+/state, "
             "and vixiot/+/cmd/ack"
         )
         self._client.loop_forever()

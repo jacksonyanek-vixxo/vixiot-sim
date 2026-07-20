@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "VixIoT Event",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "device_id",
+    "equipment_type",
+    "timestamp",
+    "seq",
+    "event"
+  ],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "device_id": { "type": "string" },
+    "equipment_type": { "type": "string" },
+    "timestamp": { "type": "string" },
+    "seq": { "type": "integer" },
+    "event": {
+      "type": "object",
+      "required": [
+        "number",
+        "name",
+        "severity",
+        "category",
+        "module",
+        "source",
+        "stateful",
+        "transition"
+      ],
+      "properties": {
+        "number": { "type": "integer" },
+        "name": { "type": "string" },
+        "severity": {
+          "type": "string",
+          "enum": ["Info", "Warning", "Error", "Fatal"]
+        },
+        "category": { "type": "string" },
+        "module": { "type": "string" },
+        "source": { "type": "string" },
+        "stateful": { "type": "boolean" },
+        "transition": {
+          "type": "string",
+          "enum": ["raised", "cleared", "momentary"]
+        }
+      }
+    }
+  }
+}

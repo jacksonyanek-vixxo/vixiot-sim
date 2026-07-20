@@ -42,6 +42,26 @@ def telemetry(seq=1):
     }
 
 
+def device_event(seq=1, number=20001):
+    return {
+        "schema_version": "1.0",
+        "device_id": "espresso-001",
+        "equipment_type": "super_automatic_espresso",
+        "timestamp": "2026-07-15T12:00:01Z",
+        "seq": seq,
+        "event": {
+            "number": number,
+            "name": "Device connected",
+            "severity": "Info",
+            "category": "Connectivity Events",
+            "module": "StatusManager",
+            "source": "StatusManager",
+            "stateful": True,
+            "transition": "momentary",
+        },
+    }
+
+
 def make_client():
     mqtt = FakeMqttClient()
     hub = SinkHub(client=mqtt, persist=False)
@@ -84,6 +104,17 @@ def test_telemetry_history_and_workorders():
             "open": [],
             "closed": [],
         }
+
+
+def test_events_history_and_ingest():
+    client, _ = make_client()
+    with client:
+        assert client.get("/api/events/espresso-001").json() == []
+        hub = client.app.state.hub
+        assert hub.ingest_event("espresso-001", device_event()) is True
+        events = client.get("/api/events/espresso-001").json()
+        assert len(events) == 1
+        assert events[0]["event"]["name"] == "Device connected"
 
 
 def test_config_push_builds_set_config_command():

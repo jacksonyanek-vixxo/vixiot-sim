@@ -53,6 +53,7 @@ def main():
     topics = {
         "telemetry": base + "/telemetry",
         "state": base + "/state",
+        "event": base + "/event",
         "cmd": base + "/cmd",
         "cmd_ack": base + "/cmd/ack",
     }
@@ -65,6 +66,8 @@ def main():
         c.subscribe(topics["cmd"], qos=1)
         birth = json.dumps(build_state_message(device_id, "online", now_iso()))
         c.publish(topics["state"], birth, retain=True, qos=1)
+        for payload in runtime.build_connectivity_events(now_iso(), True):
+            c.publish(topics["event"], json.dumps(payload), qos=1)
         print("[virtual] online as %s" % device_id)
 
     def on_message(c, userdata, msg):
@@ -95,11 +98,16 @@ def main():
     loop_ms = 100
     try:
         while True:
-            messages = runtime.tick(loop_ms, now_iso())
+            messages, event_messages = runtime.tick(loop_ms, now_iso())
 
             def publish_fn(payload):
                 client.publish(topics["telemetry"], json.dumps(payload), qos=1)
 
+            def publish_event(payload):
+                client.publish(topics["event"], json.dumps(payload), qos=1)
+
+            for payload in event_messages:
+                publish_event(payload)
             for payload in messages:
                 runtime.enqueue_or_publish(payload, publish_fn)
                 print(

@@ -202,6 +202,53 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .severity-badge.warning { color: #fcd34d; background: #422006; }
 .severity-badge.critical { color: #fca5a5; background: #450a0a; }
 
+.event-feed { margin-top: 12px; }
+.event-filters { display: flex; gap: 12px; flex-wrap: wrap; }
+.event-filters label { display: grid; gap: 4px; color: #94a3b8; font-size: .75rem; }
+.event-row {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid #1e293b;
+  padding: 12px 0;
+}
+.event-row > div { display: grid; gap: 3px; }
+.event-severity {
+  font-size: .68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 99px;
+  text-align: center;
+  background: color-mix(in srgb, var(--event-color) 18%, transparent);
+  color: var(--event-color);
+  border: 1px solid color-mix(in srgb, var(--event-color) 35%, transparent);
+}
+.event-number { font-size: .75rem; color: #64748b; font-weight: 700; }
+
+.events-config {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #1e293b;
+  display: grid;
+  gap: 14px;
+}
+.events-enabled { display: flex; align-items: center; gap: 8px; color: #cbd5e1; font-size: .85rem; }
+.event-category-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.event-category-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, .55);
+}
+.event-category-row label { display: flex; align-items: center; gap: 8px; color: #94a3b8; font-size: .78rem; }
+.event-category-row input[type="number"] { width: 72px; }
+
 .config-panel { margin-top: 12px; }
 .panel-heading p { color: #64748b; font-size: .85rem; margin-top: 4px; }
 .preset-buttons { display: flex; gap: 8px; }
@@ -231,6 +278,8 @@ button:disabled { cursor: not-allowed; opacity: .45; }
   .quality-legend { margin-left: 0; width: 100%; }
   .fault-row { grid-template-columns: 1fr 70px; }
   .fault-header span:nth-child(n+3) { display: none; }
+  .event-category-grid { grid-template-columns: 1fr; }
+  .event-row { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
   main { width: min(100% - 20px, 1440px); padding-top: 18px; }

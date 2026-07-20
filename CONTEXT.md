@@ -36,7 +36,25 @@ Preventive-maintenance threshold bands tied to counters (e.g. descale due at 500
 Monotonically increasing operational tallies: `total_shots`, `shots_since_descale`, `operating_hours`.
 
 ## Fault
-A named active degradation condition (e.g. `scaling`) listed in `active_faults`. Faults drive report-by-exception and sink-side work-order creation.
+A named active degradation condition (e.g. `scaling`) listed in `active_faults`. Faults drive report-by-exception and may trigger catalog events; they are distinct from Event occurrences.
+
+## Event
+A discrete catalog occurrence published on `vixiot/{device_id}/event` — for example boiler state changes, cleaning advisories, grounds-drawer conditions, or connectivity. Distinct from telemetry metrics and from injected simulation faults.
+
+## Event Catalog
+The embedded Mastrena II EventMaster table (73 events) mapping event numbers to names, severities, and categories. Used by the event engine to emit realistic raise/clear pairs.
+
+## Severity
+Per-event importance ladder: Info, Warning, Error, Fatal. Error and Fatal stateful raises can open work orders; Warning is advisory; Info is log-only.
+
+## Category
+Event grouping in the catalog: Machine Issue, Operational Issue, Cleaning, Connectivity Events. Configurable enable/rate per category.
+
+## Module
+The machine subsystem named in an event (e.g. `BoilerController`, `GroundsDrawer1`, `CoffeeModule2`). Work orders from events dedupe by module so two physical instances stay separate.
+
+## Stateful Event
+An event that participates in a raise/clear pairing (e.g. `GroundsDrawerFull` raised → `GroundsDrawerOK` cleared). Stateful Error/Fatal raises can open work orders; the paired clear closes them.
 
 ## Sink
 The Python receiving layer (`sink/subscriber.py`) that subscribes to MQTT topics, validates JSON against schema, persists records to JSONL, and tracks device online/offline via birth/LWT.
@@ -51,4 +69,4 @@ MQTT birth message (retained `online` on `state` topic at connect) and Last-Will
 Per-metric data-quality flag reflecting sensor health: `good`, `suspect` (anomaly applied), `bad` (out of range or stuck), `missing` (dropout).
 
 ## Work Order
-A maintenance ticket created by the sink when a device reports a new fault. One open WO per `(device_id, fault)`; closed when the fault clears from `active_faults`.
+A maintenance ticket created by the sink when a device reports a new fault or raises an Error/Fatal stateful event. One open WO per `(device_id, fault)` or `(device_id, event group, module)`; closed when the fault clears or the paired event clears.

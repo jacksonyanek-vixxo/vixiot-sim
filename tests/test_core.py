@@ -162,7 +162,8 @@ class TestRuntime:
         rt = DeviceRuntime({"publish_interval_s": 1, "sample_interval_ms": 100})
         msgs = []
         for _ in range(12):
-            msgs.extend(rt.tick(100, "2026-07-15T16:00:00Z"))
+            telemetry_msgs, _event_msgs = rt.tick(100, "2026-07-15T16:00:00Z")
+            msgs.extend(telemetry_msgs)
         assert any(m.get("seq") >= 1 for m in msgs)
 
     def test_handle_command_ack(self):

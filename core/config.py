@@ -3,6 +3,20 @@
 EQUIPMENT_TYPE = "super_automatic_espresso"
 SCHEMA_VERSION = "1.0"
 
+DEFAULT_EVENT_CATEGORIES = {
+    "Machine Issue": {"enabled": True, "rate_multiplier": 1.0},
+    "Operational Issue": {"enabled": True, "rate_multiplier": 1.0},
+    "Cleaning": {"enabled": True, "rate_multiplier": 1.0},
+    "Connectivity Events": {"enabled": True, "rate_multiplier": 1.0},
+}
+
+DEFAULT_EVENTS = {
+    "enabled": True,
+    "global_rate_multiplier": 1.0,
+    "categories": DEFAULT_EVENT_CATEGORIES,
+    "inject": [],
+}
+
 DEFAULT_IRREGULARITIES = {
     "scaling": {"enabled": False, "mtbf_hours": 200, "severity": 0.5},
     "grinder_wear": {"enabled": False, "severity": 0.3},
@@ -22,6 +36,7 @@ DEFAULT_CONFIG = {
     "sample_interval_ms": 1000,
     "publish_interval_s": 30,
     "irregularities": DEFAULT_IRREGULARITIES,
+    "events": DEFAULT_EVENTS,
 }
 
 
@@ -61,4 +76,6 @@ def apply_set_config(current, command):
             patch[key] = command[key]
     if "irregularities" in command:
         patch["irregularities"] = command["irregularities"]
+    if "events" in command:
+        patch["events"] = command["events"]
     return normalize_config(_deep_merge(current, patch))

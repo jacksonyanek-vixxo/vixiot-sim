@@ -26,6 +26,7 @@ def _topics(device_id):
     return {
         "telemetry": base + "/telemetry",
         "state": base + "/state",
+        "event": base + "/event",
         "cmd": base + "/cmd",
         "cmd_ack": base + "/cmd/ack",
     }
@@ -158,6 +159,8 @@ def main():
 
     client.subscribe(topics["cmd"])
     client.publish(topics["state"], birth, retain=True, qos=1)
+    for payload in runtime.build_connectivity_events(clock.now_iso(), True):
+        client.publish(topics["event"], json.dumps(payload), qos=1)
     print("boot: online — simulation running")
 
     if status_led:
@@ -168,13 +171,15 @@ def main():
     while True:
         _tick_led(status_led)
         client.check_msg()
-        messages = runtime.tick(loop_ms, clock.now_iso())
+        messages, event_messages = runtime.tick(loop_ms, clock.now_iso())
         faults = runtime.irregularities.active_faults()
         if status_led:
             if faults:
                 status_led.set_state(led.FAULT)
             elif status_led.state == led.FAULT:
                 status_led.set_state(led.RUNNING)
+        for payload in event_messages:
+            client.publish(topics["event"], json.dumps(payload), qos=1)
         for payload in messages:
             def _pub(p, c=client, t=topics["telemetry"]):
                 c.publish(t, json.dumps(p), qos=1)

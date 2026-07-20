@@ -16,6 +16,7 @@ ESP32-S3 MicroPython firmware simulates a Schaerer-style super-automatic espress
 | Topic | Purpose |
 |-------|---------|
 | `vixiot/{device_id}/telemetry` | Aggregated telemetry + exceptions |
+| `vixiot/{device_id}/event` | Discrete Mastrena-style catalog events (raise/clear/momentary) |
 | `vixiot/{device_id}/state` | Birth (online) + LWT (offline), retained |
 | `vixiot/{device_id}/cmd` | Downlink `set_config` |
 | `vixiot/{device_id}/cmd/ack` | Config apply result |

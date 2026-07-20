@@ -50,6 +50,17 @@ def build_state_message(device_id, status, timestamp):
     }
 
 
+def build_event(device_id, seq, timestamp, event_obj):
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "device_id": device_id,
+        "equipment_type": EQUIPMENT_TYPE,
+        "timestamp": timestamp,
+        "seq": seq,
+        "event": dict(event_obj),
+    }
+
+
 def build_cmd_ack(device_id, success, message="", config_applied=None):
     ack = {
         "schema_version": SCHEMA_VERSION,

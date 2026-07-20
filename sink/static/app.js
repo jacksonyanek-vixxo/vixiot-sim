@@ -73,6 +73,31 @@ const healthyBandPlugin = {
   },
 };
 
+const EVENT_CATEGORIES = [
+  "Machine Issue",
+  "Operational Issue",
+  "Cleaning",
+  "Connectivity Events",
+];
+
+const EVENT_SEVERITY_COLORS = {
+  Info: "#94a3b8",
+  Warning: "#f59e0b",
+  Error: "#ef4444",
+  Fatal: "#dc2626",
+};
+
+function initialEvents() {
+  return {
+    enabled: true,
+    global_rate_multiplier: 1.0,
+    categories: Object.fromEntries(
+      EVENT_CATEGORIES.map(name => [name, { enabled: true, rate_multiplier: 1.0 }])
+    ),
+    inject: [],
+  };
+}
+
 function initialFaults() {
   return Object.fromEntries(FAULTS.map(name => [name, {
     enabled: false,
@@ -98,9 +123,17 @@ document.addEventListener("alpine:init", () => {
     selectedId: "",
     snapshot: {},
     history: [],
+    events: [],
+    eventFilter: { severity: "", category: "" },
     workorders: { open: [], closed: [] },
-    config: { sample_interval_ms: 1000, publish_interval_s: 30, irregularities: initialFaults() },
+    config: {
+      sample_interval_ms: 1000,
+      publish_interval_s: 30,
+      irregularities: initialFaults(),
+      events: initialEvents(),
+    },
     faultNames: FAULTS,
+    eventCategories: EVENT_CATEGORIES,
     metricTiles: METRIC_TILES,
     chartSpecs: CHART_SPECS,
     qualityLegend: Object.entries(QUALITY_LABELS).map(([key, label]) => ({ key, label, color: QUALITY_COLORS[key] })),
@@ -146,14 +179,16 @@ document.addEventListener("alpine:init", () => {
       if (!this.selectedId) return;
       try {
         const id = encodeURIComponent(this.selectedId);
-        const [snapshot, history, workorders] = await Promise.all([
+        const [snapshot, history, workorders, events] = await Promise.all([
           this.request(`/api/snapshot/${id}`),
           this.request(`/api/telemetry/${id}`),
           this.request(`/api/workorders/${id}`),
+          this.request(`/api/events/${id}`),
         ]);
         this.snapshot = snapshot;
         this.history = history;
         this.workorders = workorders;
+        this.events = events;
         this.lastAck = snapshot.cmd_ack;
         this.loadConfig(snapshot.config);
         this.refreshCharts();
@@ -188,6 +223,7 @@ document.addEventListener("alpine:init", () => {
         if (data) {
           this.snapshot = data.snapshot || {};
           this.history = data.telemetry || [];
+          this.events = data.events || [];
           this.workorders = data.workorders || { open: [], closed: [] };
           this.loadConfig(this.snapshot.config);
           this.refreshCharts();
@@ -206,6 +242,9 @@ document.addEventListener("alpine:init", () => {
         this.snapshot.connection_status = event.data.status;
       } else if (event.type === "workorder") {
         this.updateWorkorder(event.data);
+      } else if (event.type === "event") {
+        this.events.unshift(event.data);
+        this.events = this.events.slice(0, 500);
       } else if (event.type === "cmd_ack") {
         this.lastAck = event.data;
         this.notice = event.data.success ? "Configuration applied by device" : "";
@@ -236,10 +275,18 @@ document.addEventListener("alpine:init", () => {
       if (!applied) return;
       const merged = initialFaults();
       for (const name of FAULTS) Object.assign(merged[name], applied.irregularities?.[name] || {});
+      const events = initialEvents();
+      Object.assign(events, applied.events || {});
+      if (applied.events?.categories) {
+        for (const name of EVENT_CATEGORIES) {
+          Object.assign(events.categories[name], applied.events.categories[name] || {});
+        }
+      }
       this.config = {
         sample_interval_ms: applied.sample_interval_ms ?? 1000,
         publish_interval_s: applied.publish_interval_s ?? 30,
         irregularities: merged,
+        events,
       };
     },
 
@@ -265,6 +312,7 @@ document.addEventListener("alpine:init", () => {
       this.config.sample_interval_ms = 1000;
       this.config.publish_interval_s = 30;
       for (const name of FAULTS) this.config.irregularities[name].enabled = false;
+      this.config.events = initialEvents();
     },
 
     aggressivePreset() {
@@ -276,6 +324,14 @@ document.addEventListener("alpine:init", () => {
         item.severity = 1;
         item[this.rateKey(name)] = this.isDomain(name) ? 0.01 : (name === "noise" ? 2400 : 600);
       }
+      this.config.events = {
+        enabled: true,
+        global_rate_multiplier: 3.0,
+        categories: Object.fromEntries(
+          EVENT_CATEGORIES.map(name => [name, { enabled: true, rate_multiplier: 2.0 }])
+        ),
+        inject: [],
+      };
     },
 
     createCharts() {
@@ -456,6 +512,12 @@ document.addEventListener("alpine:init", () => {
     },
 
     severityBadge(value) {
+      if (typeof value === "string") {
+        if (value === "critical" || value === "Fatal") return "critical";
+        if (value === "high" || value === "Error") return "warning";
+        if (value === "medium" || value === "Warning") return "warning";
+        return "info";
+      }
       const num = Number(value);
       if (num >= 0.75) return "critical";
       if (num >= 0.4) return "warning";
@@ -474,6 +536,24 @@ document.addEventListener("alpine:init", () => {
     },
     allWorkorders() { return [...this.workorders.open, ...this.workorders.closed].slice(0, 30); },
     openWorkorderCount() { return this.workorders.open?.length || 0; },
+    filteredEvents() {
+      return this.events.filter(record => {
+        const event = record.event || {};
+        if (this.eventFilter.severity && event.severity !== this.eventFilter.severity) return false;
+        if (this.eventFilter.category && event.category !== this.eventFilter.category) return false;
+        return true;
+      }).slice(0, 100);
+    },
+    eventSeverityColor(severity) {
+      return EVENT_SEVERITY_COLORS[severity] || "#64748b";
+    },
+    eventTransitionLabel(transition) {
+      return ({ raised: "Raised", cleared: "Cleared", momentary: "Momentary" })[transition] || transition;
+    },
+    woSeverityLabel(value) {
+      if (typeof value === "string") return value;
+      return Number(value).toFixed(2);
+    },
     chartHealthyHint(chartId) {
       const spec = CHART_SPECS[chartId];
       if (!spec) return "";

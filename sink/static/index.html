@@ -192,7 +192,7 @@
 
       <article class="panel workorders">
         <h2>Work orders <span class="count" x-text="openWorkorderCount()"></span> open</h2>
-        <p class="panel-desc">Service tickets opened when faults cross severity thresholds.</p>
+        <p class="panel-desc">Service tickets opened when faults or Error/Fatal events cross thresholds.</p>
         <div class="empty" x-show="!allWorkorders().length">No work orders yet.</div>
         <template x-for="order in allWorkorders()" :key="order.wo_id + order.status">
           <div class="workorder">
@@ -201,10 +201,49 @@
               <strong x-text="label(order.fault)"></strong>
               <small x-text="(order.status === 'closed' ? 'Closed ' : 'Opened ') + formatDateTime(order.closed_at || order.opened_at)"></small>
             </div>
-            <span class="severity-badge" :class="severityBadge(order.severity)" x-text="Number(order.severity).toFixed(2)"></span>
+            <span class="severity-badge" :class="severityBadge(order.severity)" x-text="woSeverityLabel(order.severity)"></span>
           </div>
         </template>
       </article>
+    </section>
+
+    <section class="panel event-feed">
+      <div class="panel-heading">
+        <div>
+          <h2>Event feed <span class="count" x-text="filteredEvents().length"></span></h2>
+          <p class="panel-desc">Mastrena-style discrete events from the device event stream.</p>
+        </div>
+        <div class="event-filters">
+          <label>Severity
+            <select x-model="eventFilter.severity">
+              <option value="">All</option>
+              <option>Info</option>
+              <option>Warning</option>
+              <option>Error</option>
+              <option>Fatal</option>
+            </select>
+          </label>
+          <label>Category
+            <select x-model="eventFilter.category">
+              <option value="">All</option>
+              <template x-for="category in eventCategories" :key="category">
+                <option :value="category" x-text="category"></option>
+              </template>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="empty" x-show="!filteredEvents().length">No events yet for this device.</div>
+      <template x-for="record in filteredEvents()" :key="record.seq + (record.event?.name || '')">
+        <div class="event-row">
+          <span class="event-severity" :style="`--event-color:${eventSeverityColor(record.event?.severity)}`" x-text="record.event?.severity"></span>
+          <div>
+            <strong x-text="record.event?.name"></strong>
+            <small x-text="`${record.event?.module} · ${record.event?.category} · ${eventTransitionLabel(record.event?.transition)} · ${formatDateTime(record.timestamp)}`"></small>
+          </div>
+          <span class="event-number" x-text="'#' + record.event?.number"></span>
+        </div>
+      </template>
     </section>
 
     <section class="panel config-panel">
@@ -233,6 +272,22 @@
             <label><span x-text="isDomain(name) ? 'MTBF h' : 'rate/h'"></span><input type="number" min="0" step="0.01" x-model.number="config.irregularities[name][rateKey(name)]"></label>
           </div>
         </template>
+      </div>
+      <div class="events-config">
+        <div class="section-heading">
+          <h2>Event generation</h2>
+          <p>Per-category enable and rate multipliers for Mastrena-style events.</p>
+        </div>
+        <label class="events-enabled"><input type="checkbox" x-model="config.events.enabled"> Enable event stream</label>
+        <label>Global rate multiplier<input type="number" min="0" step="0.1" x-model.number="config.events.global_rate_multiplier"></label>
+        <div class="event-category-grid">
+          <template x-for="category in eventCategories" :key="category">
+            <div class="event-category-row">
+              <label><input type="checkbox" x-model="config.events.categories[category].enabled"> <span x-text="category"></span></label>
+              <label>Rate x<input type="number" min="0" step="0.1" x-model.number="config.events.categories[category].rate_multiplier"></label>
+            </div>
+          </template>
+        </div>
       </div>
       <p class="ack" x-show="lastAck" :class="{failed: lastAck && !lastAck.success}">
         Device acknowledgement: <span x-text="lastAck ? (lastAck.message || (lastAck.success ? 'success' : 'failed')) : ''"></span>

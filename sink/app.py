@@ -135,6 +135,10 @@ def create_app(hub=None, manage_hub=True):
     def telemetry(device_id):
         return sink_hub.telemetry(device_id)
 
+    @application.get("/api/events/{device_id}")
+    def events(device_id):
+        return sink_hub.events(device_id)
+
     @application.get("/api/workorders/{device_id}")
     def workorders(device_id):
         return sink_hub.workorders(device_id)
