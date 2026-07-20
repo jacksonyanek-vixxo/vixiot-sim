@@ -179,12 +179,17 @@ document.addEventListener("alpine:init", () => {
       if (!this.selectedId) return;
       try {
         const id = encodeURIComponent(this.selectedId);
-        const [snapshot, history, workorders, events] = await Promise.all([
+        const [snapshot, history, workorders] = await Promise.all([
           this.request(`/api/snapshot/${id}`),
           this.request(`/api/telemetry/${id}`),
           this.request(`/api/workorders/${id}`),
-          this.request(`/api/events/${id}`),
         ]);
+        let events = [];
+        try {
+          events = await this.request(`/api/events/${id}`);
+        } catch (_error) {
+          events = [];
+        }
         this.snapshot = snapshot;
         this.history = history;
         this.workorders = workorders;
@@ -276,10 +281,19 @@ document.addEventListener("alpine:init", () => {
       const merged = initialFaults();
       for (const name of FAULTS) Object.assign(merged[name], applied.irregularities?.[name] || {});
       const events = initialEvents();
-      Object.assign(events, applied.events || {});
-      if (applied.events?.categories) {
-        for (const name of EVENT_CATEGORIES) {
-          Object.assign(events.categories[name], applied.events.categories[name] || {});
+      if (applied.events) {
+        if (typeof applied.events.enabled === "boolean") events.enabled = applied.events.enabled;
+        if (applied.events.global_rate_multiplier != null) {
+          events.global_rate_multiplier = applied.events.global_rate_multiplier;
+        }
+        if (Array.isArray(applied.events.inject)) events.inject = applied.events.inject;
+        if (applied.events.categories) {
+          for (const name of EVENT_CATEGORIES) {
+            if (!events.categories[name]) {
+              events.categories[name] = { enabled: true, rate_multiplier: 1.0 };
+            }
+            Object.assign(events.categories[name], applied.events.categories[name] || {});
+          }
         }
       }
       this.config = {
@@ -350,26 +364,29 @@ document.addEventListener("alpine:init", () => {
           type: "line",
           data: {
             labels: [],
-            datasets: spec.metrics.map(([key, label], index) => ({
-              key,
+            datasets: spec.metrics.map(([metricKey, label], index) => {
+              const colorIndex = index;
+              return {
+              metricKey,
               label,
               data: [],
               _qualities: [],
               _windows: [],
-              borderColor: palette[index % palette.length],
-              backgroundColor: palette[index % palette.length] + "22",
+              borderColor: palette[colorIndex % palette.length],
+              backgroundColor: palette[colorIndex % palette.length] + "22",
               borderWidth: 2,
               pointRadius: 3,
               pointHoverRadius: 5,
               pointBackgroundColor: context => {
                 const quality = context.dataset._qualities?.[context.dataIndex];
-                return QUALITY_COLORS[quality] || palette[index % palette.length];
+                return QUALITY_COLORS[quality] || palette[colorIndex % palette.length];
               },
               pointBorderColor: "#0f172a",
               pointBorderWidth: 1,
               tension: 0.25,
               spanGaps: true,
-            })),
+            };
+            }),
           },
           options: {
             animation: false,
@@ -400,7 +417,7 @@ document.addEventListener("alpine:init", () => {
                   label: context => {
                     const value = context.parsed.y;
                     if (value == null) return `${context.dataset.label}: no data`;
-                    const unit = formatUnit(METRIC_SPECS[context.dataset.key]?.unit || spec.unit);
+                    const unit = formatUnit(METRIC_SPECS[context.dataset.metricKey]?.unit || spec.unit);
                     const quality = context.dataset._qualities?.[context.dataIndex] || "missing";
                     return `${context.dataset.label}: ${value} ${unit} (${QUALITY_LABELS[quality] || quality})`;
                   },
@@ -409,7 +426,7 @@ document.addEventListener("alpine:init", () => {
                     for (const item of items) {
                       const window = item.dataset._windows?.[item.dataIndex];
                       if (!window) continue;
-                      const unit = formatUnit(METRIC_SPECS[item.dataset.key]?.unit || spec.unit);
+                      const unit = formatUnit(METRIC_SPECS[item.dataset.metricKey]?.unit || spec.unit);
                       lines.push(`${item.dataset.label} window: min ${window.min}, max ${window.max}, avg ${window.mean} ${unit}`);
                     }
                     return lines;
@@ -435,20 +452,30 @@ document.addEventListener("alpine:init", () => {
       }
     },
 
+    chartRecords() {
+      const records = this.history.slice(-100);
+      if (records.length) return records;
+      if (this.snapshot?.metrics && Object.keys(this.snapshot.metrics).length) {
+        return [this.snapshot];
+      }
+      return [];
+    },
+
     refreshCharts() {
       if (!Object.keys(this.charts).length) return;
-      const records = this.history.slice(-100);
+      const records = this.chartRecords();
       for (const chart of Object.values(this.charts)) {
         chart.data.labels = records.map(item => this.formatTime(item.timestamp));
         for (const dataset of chart.data.datasets) {
-          dataset.data = records.map(item => item.metrics?.[dataset.key]?.value ?? null);
-          dataset._qualities = records.map(item => item.metrics?.[dataset.key]?.quality || "missing");
+          dataset.data = records.map(item => item.metrics?.[dataset.metricKey]?.value ?? null);
+          dataset._qualities = records.map(item => item.metrics?.[dataset.metricKey]?.quality || "missing");
           dataset._windows = records.map(item => {
-            const metric = item.metrics?.[dataset.key];
+            const metric = item.metrics?.[dataset.metricKey];
             return metric?.min != null ? { min: metric.min, max: metric.max, mean: metric.mean } : null;
           });
         }
         chart.update("none");
+        if (typeof chart.resize === "function") chart.resize();
       }
     },
 
