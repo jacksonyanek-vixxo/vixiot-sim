@@ -118,7 +118,11 @@ function healthyHint(metricKey) {
 }
 
 document.addEventListener("alpine:init", () => {
-  Alpine.data("dashboard", () => ({
+  Alpine.data("dashboard", () => {
+    // Chart.js instances must stay OUT of Alpine's reactive proxy — wrapping them
+    // corrupts Chart's internal state so the axes render but data never plots.
+    const chartRegistry = {};
+    return {
     devices: [],
     selectedId: "",
     snapshot: {},
@@ -137,7 +141,6 @@ document.addEventListener("alpine:init", () => {
     metricTiles: METRIC_TILES,
     chartSpecs: CHART_SPECS,
     qualityLegend: Object.entries(QUALITY_LABELS).map(([key, label]) => ({ key, label, color: QUALITY_COLORS[key] })),
-    charts: {},
     socket: null,
     reconnectTimer: null,
     lastAck: null,
@@ -360,7 +363,7 @@ document.addEventListener("alpine:init", () => {
         const canvas = document.getElementById(elementId);
         if (!canvas) throw new Error(`Missing chart canvas: ${elementId}`);
 
-        this.charts[elementId] = new Chart(canvas, {
+        chartRegistry[elementId] = new Chart(canvas, {
           type: "line",
           data: {
             labels: [],
@@ -462,9 +465,9 @@ document.addEventListener("alpine:init", () => {
     },
 
     refreshCharts() {
-      if (!Object.keys(this.charts).length) return;
+      if (!Object.keys(chartRegistry).length) return;
       const records = this.chartRecords();
-      for (const chart of Object.values(this.charts)) {
+      for (const chart of Object.values(chartRegistry)) {
         chart.data.labels = records.map(item => this.formatTime(item.timestamp));
         for (const dataset of chart.data.datasets) {
           dataset.data = records.map(item => item.metrics?.[dataset.metricKey]?.value ?? null);
@@ -587,5 +590,6 @@ document.addEventListener("alpine:init", () => {
       if (spec.metrics.length === 1) return `Healthy: ${healthyHint(spec.metrics[0][0])}`;
       return spec.metrics.map(([key]) => `${METRIC_SPECS[key]?.label}: ${healthyHint(key)}`).join(" · ");
     },
-  }));
+    };
+  });
 });
