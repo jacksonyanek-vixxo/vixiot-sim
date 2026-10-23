@@ -4,217 +4,293 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>VixIoT Dashboard</title>
-  <link rel="stylesheet" href="/static/styles.css?v=3">
+  <link rel="stylesheet" href="/static/styles.css?v=10">
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <script defer src="/static/app.js?v=3"></script>
+  <script defer src="/static/app.js?v=10"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
 </head>
 <body>
-  <main x-data="dashboard" x-init="init()">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">VixIoT simulator</p>
-        <h1>Equipment dashboard</h1>
-      </div>
-      <label class="device-picker">Device
-        <select x-model="selectedId" @change="selectDevice()">
-          <option value="">Waiting for a device…</option>
-          <template x-for="device in devices" :key="device.device_id">
-            <option :value="device.device_id" x-text="device.device_id"></option>
-          </template>
-        </select>
-      </label>
-    </header>
-
-    <p class="banner error" x-show="error" x-text="error"></p>
-    <p class="banner success" x-show="notice" x-text="notice"></p>
-
-    <section class="device-meta" x-show="selectedId" x-cloak>
-      <div class="meta-item">
-        <small>Equipment</small>
-        <strong x-text="label(snapshot.equipment_type || 'super_automatic_espresso')"></strong>
-      </div>
-      <div class="meta-item">
-        <small>Last telemetry</small>
-        <strong x-text="formatDateTime(snapshot.timestamp)"></strong>
-      </div>
-      <div class="meta-item">
-        <small>Sequence</small>
-        <strong x-text="snapshot.seq ?? '—'"></strong>
-      </div>
-      <div class="meta-item" x-show="windowInfo()">
-        <small>Publish window</small>
-        <strong x-text="windowInfo()"></strong>
-      </div>
-      <div class="quality-legend">
-        <small>Point color = data quality</small>
-        <div class="quality-chips">
-          <template x-for="item in qualityLegend" :key="item.key">
-            <span class="quality-chip" :style="`--chip-color:${item.color}`" x-text="item.label"></span>
-          </template>
-        </div>
-      </div>
-    </section>
-
-    <section class="status-grid">
-      <article class="status-card">
-        <span class="status-dot" :class="{online: snapshot.online}"></span>
+  <main x-data="dashboard" x-init="init()" @keydown.escape.window="closeChart()">
+    <section class="story">
+      <header class="topbar">
         <div>
-          <small>Connection</small>
-          <strong x-text="snapshot.connection_status || 'unknown'"></strong>
+          <p class="eyebrow">VixIoT</p>
+          <h1>Espresso machine</h1>
+          <p class="lede">Live readings from the machine, and the VixxoNow ticket those readings open.</p>
         </div>
-      </article>
-      <article class="status-card">
-        <div>
-          <small>Machine state</small>
-          <span class="state-pill" :class="stateClass()" x-text="snapshot.state || '—'"></span>
+        <div class="header-side">
+          <div class="quality-legend">
+            <span class="tip">Reading quality
+              <span class="tip-bubble">Dot color on the charts. Green means the reading looks normal. Amber means check it. Red means it looks wrong.</span>
+            </span>
+            <div class="quality-chips">
+              <template x-for="item in qualityLegend" :key="item.key">
+                <span class="quality-chip" :style="`--chip-color:${item.color}`" x-text="item.label"></span>
+              </template>
+            </div>
+          </div>
+          <label class="device-picker">Machine
+            <select x-model="selectedId" @change="selectDevice()">
+              <option value="">Waiting for a machine…</option>
+              <template x-for="device in devices" :key="device.device_id">
+                <option :value="device.device_id" x-text="device.device_id"></option>
+              </template>
+            </select>
+          </label>
         </div>
-      </article>
-      <article class="status-card">
-        <div>
-          <small>Total shots</small>
-          <strong x-text="counter('total_shots')"></strong>
-        </div>
-      </article>
-      <article class="status-card">
-        <div>
-          <small>Operating hours</small>
-          <strong x-text="typeof counter('operating_hours') === 'number' ? counter('operating_hours').toFixed(1) : counter('operating_hours')"></strong>
-        </div>
-      </article>
-      <article class="status-card pm-card" :class="{ 'pm-due': pmDue() }">
-        <div>
-          <small>Descale interval</small>
-          <strong x-text="pmLabel()"></strong>
-          <p class="pm-note" x-show="pmDue()">Descale recommended</p>
-        </div>
-        <div class="progress" :class="{ due: pmDue() }"><span :style="`width:${pmProgress()}%`"></span></div>
-      </article>
-    </section>
+      </header>
 
-    <section class="pm-advisories" x-show="pmAdvisories().length">
-      <template x-for="advisory in pmAdvisories()" :key="advisory">
-        <span class="advisory-chip" x-text="advisory"></span>
-      </template>
-    </section>
+      <p class="banner error" x-show="error" x-text="error"></p>
+      <p class="banner success" x-show="notice" x-text="notice"></p>
 
-    <section class="metrics-strip">
-      <div class="section-heading">
-        <h2>Live readings</h2>
-        <p>Current values from the latest telemetry publish</p>
-      </div>
-      <div class="metric-tiles">
-        <template x-for="key in metricTiles" :key="key">
-          <article class="metric-tile" :class="'quality-' + metricQuality(key)">
-            <small x-text="metricLabel(key)"></small>
-            <strong x-text="metricValue(key)"></strong>
-            <span class="metric-range" x-text="'Healthy ' + metricHealthy(key)"></span>
+      <section class="status-grid" x-show="selectedId" x-cloak>
+        <article class="status-card">
+          <svg class="status-icon" :class="{online: snapshot.online}" x-show="snapshot.online" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 20h.01" />
+            <path d="M2 8.82a15 15 0 0 1 20 0" />
+            <path d="M5 12.859a10 10 0 0 1 14 0" />
+            <path d="M8.5 16.429a5 5 0 0 1 7 0" />
+          </svg>
+          <svg class="status-icon offline" x-show="!snapshot.online" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 20h.01" />
+            <path d="M8.5 16.429a5 5 0 0 1 7 0" />
+            <path d="M5 12.859a10 10 0 0 1 5.17-2.69" />
+            <path d="M19 12.859a10 10 0 0 0-2.007-1.523" />
+            <path d="M2 8.82a15 15 0 0 1 4.177-2.643" />
+            <path d="M22 8.82a15 15 0 0 0-11.288-3.764" />
+            <path d="m2 2 20 20" />
+          </svg>
+          <div>
+            <span class="tip">Connection
+              <span class="tip-bubble">Connected means the machine is on the link. Offline means it has dropped off.</span>
+            </span>
+            <strong x-text="connectionLabel()"></strong>
+          </div>
+        </article>
+        <article class="status-card">
+          <svg class="status-icon" :class="{fault: snapshot.state === 'fault'}" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />
+          </svg>
+          <div>
+            <span class="tip">Status
+              <span class="tip-bubble">Idle, brewing, steaming, cleaning, or fault.</span>
+            </span>
+            <strong x-text="machineStatus()"></strong>
+          </div>
+        </article>
+        <article class="status-card">
+          <svg class="status-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M10 2v2" />
+            <path d="M14 2v2" />
+            <path d="M16 8a1 1 0 0 1 1 1v8a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V9a1 1 0 0 1 1-1h14a4 4 0 1 1 0 8h-1" />
+            <path d="M6 2v2" />
+          </svg>
+          <div>
+            <span class="tip">Drinks made
+              <span class="tip-bubble">Shots since this machine was put in service.</span>
+            </span>
+            <strong x-text="counter('total_shots')"></strong>
+          </div>
+        </article>
+        <article class="status-card">
+          <svg class="status-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          <div>
+            <span class="tip">Hours running
+              <span class="tip-bubble">How long the machine has been in operation.</span>
+            </span>
+            <strong x-text="typeof counter('operating_hours') === 'number' ? counter('operating_hours').toFixed(1) : counter('operating_hours')"></strong>
+          </div>
+        </article>
+        <article class="status-card pm-card" :class="{ 'pm-due': pmDue() }">
+          <svg class="status-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z" />
+            <path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97" />
+          </svg>
+          <div>
+            <span class="tip">Descaling
+              <span class="tip-bubble">Shots since the last descaling. A full bar means mineral buildup is due for cleaning.</span>
+            </span>
+            <strong x-text="pmLabel()"></strong>
+            <div class="progress" :class="{ due: pmDue() }"><span :style="`width:${pmProgress()}%`"></span></div>
+          </div>
+        </article>
+      </section>
+
+      <section class="stage">
+        <div class="chart-grid">
+          <article class="panel chart-panel" role="button" tabindex="0"
+            @click="expandChart('temperatureChart')"
+            @keydown.enter.prevent="expandChart('temperatureChart')"
+            @keydown.space.prevent="expandChart('temperatureChart')">
+            <div class="chart-header">
+              <div>
+                <h2>Temperatures</h2>
+                <p class="panel-desc">Heat in the boilers. A steady brew temperature makes a consistent shot.</p>
+              </div>
+              <div class="chart-live">
+                <span><em>Brew</em> <strong x-text="metricValue('brew_boiler_temp')"></strong></span>
+                <span><em>Steam</em> <strong x-text="metricValue('steam_boiler_temp')"></strong></span>
+              </div>
+            </div>
+            <div class="chart-canvas-wrap"><canvas id="temperatureChart"></canvas></div>
+            <p class="enlarge-hint">Click to enlarge</p>
           </article>
-        </template>
+
+          <article class="panel chart-panel" role="button" tabindex="0"
+            @click="expandChart('pressureChart')"
+            @keydown.enter.prevent="expandChart('pressureChart')"
+            @keydown.space.prevent="expandChart('pressureChart')">
+            <div class="chart-header">
+              <div>
+                <h2>Brew pressure</h2>
+                <p class="panel-desc">Pressure while a shot is pouring. About 9 bar is the target.</p>
+              </div>
+              <div class="chart-live">
+                <span><em>Now</em> <strong x-text="metricValue('brew_pressure')"></strong></span>
+              </div>
+            </div>
+            <div class="chart-canvas-wrap"><canvas id="pressureChart"></canvas></div>
+            <p class="enlarge-hint">Click to enlarge</p>
+          </article>
+
+          <article class="panel chart-panel" role="button" tabindex="0"
+            @click="expandChart('flowChart')"
+            @keydown.enter.prevent="expandChart('flowChart')"
+            @keydown.space.prevent="expandChart('flowChart')">
+            <div class="chart-header">
+              <div>
+                <h2>Water flow</h2>
+                <p class="panel-desc">Water moving through the group. It rises while a shot is pouring.</p>
+              </div>
+              <div class="chart-live">
+                <span><em>Now</em> <strong x-text="metricValue('water_flow')"></strong></span>
+              </div>
+            </div>
+            <div class="chart-canvas-wrap"><canvas id="flowChart"></canvas></div>
+            <p class="enlarge-hint">Click to enlarge</p>
+          </article>
+
+          <article class="panel chart-panel" role="button" tabindex="0"
+            @click="expandChart('currentChart')"
+            @keydown.enter.prevent="expandChart('currentChart')"
+            @keydown.space.prevent="expandChart('currentChart')">
+            <div class="chart-header">
+              <div>
+                <h2>Pump and grinder</h2>
+                <p class="panel-desc">Power those motors draw. A spike can mean wear or a blockage.</p>
+              </div>
+              <div class="chart-live">
+                <span><em>Pump</em> <strong x-text="metricValue('pump_current')"></strong></span>
+                <span><em>Grinder</em> <strong x-text="metricValue('grinder_current')"></strong></span>
+              </div>
+            </div>
+            <div class="chart-canvas-wrap"><canvas id="currentChart"></canvas></div>
+            <p class="enlarge-hint">Click to enlarge</p>
+          </article>
+        </div>
+
+        <aside class="side">
+          <article class="panel issues-panel">
+            <h2>Needs attention <span class="count" x-text="activeFaults.length"></span></h2>
+            <p class="panel-desc">Problems the machine is reporting right now.</p>
+            <div class="empty" x-show="!activeFaults.length">Nothing needs service. The machine looks normal.</div>
+            <template x-for="fault in activeFaults" :key="fault">
+              <div class="fault">
+                <strong x-text="label(fault)"></strong>
+              </div>
+            </template>
+          </article>
+
+          <article class="panel workorders">
+            <div class="vixxo-heading">
+              <p class="eyebrow">VixxoNow</p>
+              <h2>Service tickets <span class="count" x-text="openWorkorderCount()"></span></h2>
+            </div>
+            <p class="panel-desc">A problem is sent to VixxoNow, then opened there. Issues within 2 minutes share one ticket.</p>
+            <div class="empty" x-show="!allWorkorders().length">No ticket yet. VixxoNow opens one when the machine reports a problem.</div>
+            <div class="wo-list">
+              <template x-for="order in allWorkorders()" :key="order.wo_id + order.handoff + order.status">
+                <div class="wo-card" :class="order.status">
+                  <div class="wo-top">
+                    <strong class="wo-number" x-text="order.work_order_number || order.wo_id"></strong>
+                    <span class="badge" :class="order.handoff || order.status" x-text="order.handoff_label || order.status"></span>
+                  </div>
+                  <p class="wo-problem" x-text="order.summary || label(order.fault)"></p>
+                  <ul class="wo-issues" x-show="(order.issues || []).length > 1">
+                    <template x-for="issue in order.issues" :key="issue.id">
+                      <li :class="{cleared: issue.active === false}" x-text="issue.summary"></li>
+                    </template>
+                  </ul>
+                  <ol class="wo-steps">
+                    <li class="done">
+                      <span class="tip">Sent to VixxoNow
+                        <span class="tip-bubble">The machine’s problem has been handed to VixxoNow.</span>
+                      </span>
+                      <time x-text="formatTime(order.sent_at || order.opened_at)"></time>
+                    </li>
+                    <li :class="{ done: order.handoff === 'opened' }">
+                      <span class="tip">Opened in VixxoNow
+                        <span class="tip-bubble">VixxoNow has created the service ticket. A new ticket starts as Submitted.</span>
+                      </span>
+                      <time x-text="order.opened_in_vixxonow_at ? formatTime(order.opened_in_vixxonow_at) : 'Waiting'"></time>
+                    </li>
+                  </ol>
+                  <dl class="wo-facts" x-show="order.handoff === 'opened'">
+                    <div>
+                      <dt class="tip">VixxoNow status
+                        <span class="tip-bubble">Submitted is the first status on a new VixxoNow ticket.</span>
+                      </dt>
+                      <dd x-text="order.vixxonow_status_display || 'Submitted'"></dd>
+                    </div>
+                    <div>
+                      <dt class="tip">Equipment Type
+                        <span class="tip-bubble">Brewing is the equipment type VixxoNow uses for an espresso machine.</span>
+                      </dt>
+                      <dd x-text="order.asset_type || 'Brewing'"></dd>
+                    </div>
+                    <div>
+                      <dt class="tip">Service Request Number
+                        <span class="tip-bubble">The service request number paired with this work order. It starts with 1-.</span>
+                      </dt>
+                      <dd x-text="order.siebel_sr_number"></dd>
+                    </div>
+                  </dl>
+                  <p class="wo-recovered" x-show="order.machine_recovered">The machine recovered. This ticket was already opened in VixxoNow.</p>
+                </div>
+              </template>
+            </div>
+          </article>
+        </aside>
+      </section>
+    </section>
+
+    <template x-if="expandedChart">
+    <div class="chart-modal" @click.self="closeChart()">
+      <div class="chart-modal-card" role="dialog" aria-modal="true" :aria-label="expandedTitle()">
+        <div class="chart-header">
+          <div>
+            <h2 x-text="expandedTitle()"></h2>
+            <p class="panel-desc" x-text="expandedDesc()"></p>
+          </div>
+          <button type="button" @click="closeChart()">Close</button>
+        </div>
+        <div class="chart-canvas-wrap modal-chart"><canvas id="expandedChart"></canvas></div>
+        <p class="healthy-hint" x-text="expandedChart ? chartHealthyHint(expandedChart) : ''"></p>
       </div>
-    </section>
+    </div>
+    </template>
 
-    <section class="chart-grid">
-      <article class="panel chart-panel">
-        <div class="chart-header">
-          <div>
-            <h2>Temperatures</h2>
-            <p class="panel-desc">Boiler and ambient heat — steady brew temp is critical for extraction quality.</p>
-          </div>
-          <div class="chart-live">
-            <span><em>Brew</em> <strong x-text="metricValue('brew_boiler_temp')"></strong></span>
-            <span><em>Steam</em> <strong x-text="metricValue('steam_boiler_temp')"></strong></span>
-          </div>
-        </div>
-        <div class="chart-canvas-wrap"><canvas id="temperatureChart"></canvas></div>
-        <p class="healthy-hint" x-text="chartHealthyHint('temperatureChart')"></p>
-      </article>
-
-      <article class="panel chart-panel">
-        <div class="chart-header">
-          <div>
-            <h2>Brew pressure</h2>
-            <p class="panel-desc">Extraction pressure during a shot — target ~9 bar while brewing.</p>
-          </div>
-          <div class="chart-live">
-            <span><em>Now</em> <strong x-text="metricValue('brew_pressure')"></strong></span>
-          </div>
-        </div>
-        <div class="chart-canvas-wrap"><canvas id="pressureChart"></canvas></div>
-        <p class="healthy-hint" x-text="chartHealthyHint('pressureChart')"></p>
-      </article>
-
-      <article class="panel chart-panel">
-        <div class="chart-header">
-          <div>
-            <h2>Water flow</h2>
-            <p class="panel-desc">Flow rate through the group head — spikes during active brewing.</p>
-          </div>
-          <div class="chart-live">
-            <span><em>Now</em> <strong x-text="metricValue('water_flow')"></strong></span>
-          </div>
-        </div>
-        <div class="chart-canvas-wrap"><canvas id="flowChart"></canvas></div>
-        <p class="healthy-hint" x-text="chartHealthyHint('flowChart')"></p>
-      </article>
-
-      <article class="panel chart-panel">
-        <div class="chart-header">
-          <div>
-            <h2>Motor currents</h2>
-            <p class="panel-desc">Pump and grinder draw — unusual spikes can indicate wear or blockage.</p>
-          </div>
-          <div class="chart-live">
-            <span><em>Pump</em> <strong x-text="metricValue('pump_current')"></strong></span>
-            <span><em>Grinder</em> <strong x-text="metricValue('grinder_current')"></strong></span>
-          </div>
-        </div>
-        <div class="chart-canvas-wrap"><canvas id="currentChart"></canvas></div>
-        <p class="healthy-hint" x-text="chartHealthyHint('currentChart')"></p>
-      </article>
-    </section>
-
-    <section class="lower-grid">
-      <article class="panel">
-        <h2>Active faults <span class="count" x-text="activeFaults.length"></span></h2>
-        <p class="panel-desc">Runtime faults reported by the device — severity reflects injection config, not live WO severity.</p>
-        <div class="empty" x-show="!activeFaults.length">No active faults — machine is operating normally.</div>
-        <template x-for="fault in activeFaults" :key="fault">
-          <div class="fault">
-            <div>
-              <strong x-text="label(fault)"></strong>
-              <small>Injected severity</small>
-            </div>
-            <span class="severity-badge" :class="severityBadge(severity(fault))" x-text="severity(fault)"></span>
-          </div>
-        </template>
-      </article>
-
-      <article class="panel workorders">
-        <h2>Work orders <span class="count" x-text="openWorkorderCount()"></span> open</h2>
-        <p class="panel-desc">Service tickets opened when faults or Error/Fatal events cross thresholds.</p>
-        <div class="empty" x-show="!allWorkorders().length">No work orders yet.</div>
-        <template x-for="order in allWorkorders()" :key="order.wo_id + order.status">
-          <div class="workorder">
-            <span class="badge" :class="order.status" x-text="order.status"></span>
-            <div>
-              <strong x-text="label(order.fault)"></strong>
-              <small x-text="(order.status === 'closed' ? 'Closed ' : 'Opened ') + formatDateTime(order.closed_at || order.opened_at)"></small>
-            </div>
-            <span class="severity-badge" :class="severityBadge(order.severity)" x-text="woSeverityLabel(order.severity)"></span>
-          </div>
-        </template>
-      </article>
-    </section>
-
-    <section class="panel event-feed">
-      <div class="panel-heading">
-        <div>
-          <h2>Event feed <span class="count" x-text="filteredEvents().length"></span></h2>
-          <p class="panel-desc">Mastrena-style discrete events from the device event stream.</p>
-        </div>
+    <section class="below">
+      <details class="panel event-feed">
+        <summary>
+          <h2>Machine messages <span class="count" x-text="filteredEvents().length"></span></h2>
+          <p class="panel-desc">Short notes from the machine, separate from the charts.</p>
+        </summary>
         <div class="event-filters">
-          <label>Severity
+          <label>How serious
             <select x-model="eventFilter.severity">
               <option value="">All</option>
               <option>Info</option>
@@ -223,7 +299,7 @@
               <option>Fatal</option>
             </select>
           </label>
-          <label>Category
+          <label>Type
             <select x-model="eventFilter.category">
               <option value="">All</option>
               <template x-for="category in eventCategories" :key="category">
@@ -232,66 +308,72 @@
             </select>
           </label>
         </div>
-      </div>
-      <div class="empty" x-show="!filteredEvents().length">No events yet for this device.</div>
-      <template x-for="record in filteredEvents()" :key="record.seq + (record.event?.name || '')">
-        <div class="event-row">
-          <span class="event-severity" :style="`--event-color:${eventSeverityColor(record.event?.severity)}`" x-text="record.event?.severity"></span>
-          <div>
-            <strong x-text="record.event?.name"></strong>
-            <small x-text="`${record.event?.module} · ${record.event?.category} · ${eventTransitionLabel(record.event?.transition)} · ${formatDateTime(record.timestamp)}`"></small>
-          </div>
-          <span class="event-number" x-text="'#' + record.event?.number"></span>
-        </div>
-      </template>
-    </section>
-
-    <section class="panel config-panel">
-      <div class="panel-heading">
-        <div>
-          <h2>Configuration & fault injection</h2>
-          <p>Changes are published as a set_config command to the selected device.</p>
-        </div>
-        <div class="preset-buttons">
-          <button class="secondary" @click="healthyPreset()">Healthy</button>
-          <button class="secondary" @click="aggressivePreset()">Aggressive</button>
-          <button @click="applyConfig()" :disabled="!selectedId || saving" x-text="saving ? 'Applying…' : 'Apply'"></button>
-        </div>
-      </div>
-      <div class="intervals">
-        <label>Sample interval (ms)<input type="number" min="10" x-model.number="config.sample_interval_ms"></label>
-        <label>Publish interval (s)<input type="number" min="1" x-model.number="config.publish_interval_s"></label>
-      </div>
-      <div class="fault-table">
-        <div class="fault-row fault-header"><span>Fault</span><span>Enabled</span><span>Severity</span><span>Rate / MTBF</span></div>
-        <template x-for="name in faultNames" :key="name">
-          <div class="fault-row">
-            <strong x-text="label(name)"></strong>
-            <input type="checkbox" x-model="config.irregularities[name].enabled">
-            <label class="range"><input type="range" min="0" max="1" step="0.05" x-model.number="config.irregularities[name].severity"><span x-text="Number(config.irregularities[name].severity).toFixed(2)"></span></label>
-            <label><span x-text="isDomain(name) ? 'MTBF h' : 'rate/h'"></span><input type="number" min="0" step="0.01" x-model.number="config.irregularities[name][rateKey(name)]"></label>
+        <div class="empty" x-show="!filteredEvents().length">No messages yet.</div>
+        <template x-for="record in filteredEvents()" :key="record.seq + (record.event?.name || '')">
+          <div class="event-row">
+            <span class="event-severity" :style="`--event-color:${eventSeverityColor(record.event?.severity)}`" x-text="record.event?.severity"></span>
+            <div>
+              <strong x-text="record.event?.name"></strong>
+              <small x-text="`${record.event?.module} · ${record.event?.category} · ${eventTransitionLabel(record.event?.transition)} · ${formatDateTime(record.timestamp)}`"></small>
+            </div>
+            <span class="event-number" x-text="'#' + record.event?.number"></span>
           </div>
         </template>
-      </div>
-      <div class="events-config">
-        <div class="section-heading">
-          <h2>Event generation</h2>
-          <p>Per-category enable and rate multipliers for Mastrena-style events.</p>
+      </details>
+
+      <details class="panel config-panel">
+        <summary>
+          <h2>Demo controls</h2>
+          <p class="panel-desc">For the presenter. Major breakage fails the pump, heater, and group once. Reset clears that and returns the machine to normal.</p>
+        </summary>
+        <div class="preset-buttons">
+          <button class="secondary" @click="healthyPreset()">Healthy machine</button>
+          <button class="secondary" @click="aggressivePreset()">Show problems</button>
+          <button class="danger" @click="majorBreakage()" :disabled="!selectedId || saving">Major breakage</button>
+          <button class="secondary" @click="resetMachine()" :disabled="!selectedId || saving">Reset</button>
+          <button @click="applyConfig()" :disabled="!selectedId || saving" x-text="saving ? 'Sending…' : 'Send to machine'"></button>
         </div>
-        <label class="events-enabled"><input type="checkbox" x-model="config.events.enabled"> Enable event stream</label>
-        <label>Global rate multiplier<input type="number" min="0" step="0.1" x-model.number="config.events.global_rate_multiplier"></label>
-        <div class="event-category-grid">
-          <template x-for="category in eventCategories" :key="category">
-            <div class="event-category-row">
-              <label><input type="checkbox" x-model="config.events.categories[category].enabled"> <span x-text="category"></span></label>
-              <label>Rate x<input type="number" min="0" step="0.1" x-model.number="config.events.categories[category].rate_multiplier"></label>
+        <div class="intervals">
+          <label class="tip-field">How often it measures (ms)
+            <span class="tip-bubble">How many milliseconds between sensor readings on the machine.</span>
+            <input type="number" min="10" x-model.number="config.sample_interval_ms">
+          </label>
+          <label class="tip-field">How often it reports (seconds)
+            <span class="tip-bubble">How many seconds between messages on the charts.</span>
+            <input type="number" min="1" x-model.number="config.publish_interval_s">
+          </label>
+        </div>
+        <div class="fault-table">
+          <div class="fault-row fault-header"><span>Problem</span><span>On</span><span>How strong</span><span>How often</span></div>
+          <template x-for="name in faultNames" :key="name">
+            <div class="fault-row">
+              <strong x-text="label(name)"></strong>
+              <input type="checkbox" x-model="config.irregularities[name].enabled">
+              <label class="range"><input type="range" min="0" max="1" step="0.05" x-model.number="config.irregularities[name].severity"><span x-text="Number(config.irregularities[name].severity).toFixed(2)"></span></label>
+              <label><span x-text="isDomain(name) ? 'Hours between' : 'Times per hour'"></span><input type="number" min="0" step="0.01" x-model.number="config.irregularities[name][rateKey(name)]"></label>
             </div>
           </template>
         </div>
-      </div>
-      <p class="ack" x-show="lastAck" :class="{failed: lastAck && !lastAck.success}">
-        Device acknowledgement: <span x-text="lastAck ? (lastAck.message || (lastAck.success ? 'success' : 'failed')) : ''"></span>
-      </p>
+        <div class="events-config">
+          <div class="section-heading">
+            <h2>Machine messages</h2>
+            <p>Turn message types on, and make them happen more or less often.</p>
+          </div>
+          <label class="events-enabled"><input type="checkbox" x-model="config.events.enabled"> Send machine messages</label>
+          <label>Overall speed<input type="number" min="0" step="0.1" x-model.number="config.events.global_rate_multiplier"></label>
+          <div class="event-category-grid">
+            <template x-for="category in eventCategories" :key="category">
+              <div class="event-category-row">
+                <label><input type="checkbox" x-model="config.events.categories[category].enabled"> <span x-text="category"></span></label>
+                <label>Speed<input type="number" min="0" step="0.1" x-model.number="config.events.categories[category].rate_multiplier"></label>
+              </div>
+            </template>
+          </div>
+        </div>
+        <p class="ack" x-show="lastAck" :class="{failed: lastAck && !lastAck.success}">
+          Machine reply: <span x-text="lastAck ? (lastAck.message || (lastAck.success ? 'received' : 'could not apply')) : ''"></span>
+        </p>
+      </details>
     </section>
   </main>
 </body>

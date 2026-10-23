@@ -171,3 +171,32 @@ class TestRuntime:
         ack = rt.handle_command({"cmd": "set_config", "publish_interval_s": 10})
         assert ack["success"]
         assert rt.config["publish_interval_s"] == 10
+
+    def test_major_breakage_is_immediate_and_not_a_saved_mode(self):
+        rt = DeviceRuntime({"device_id": "espresso-001"})
+        ack = rt.handle_command({"cmd": "major_breakage"})
+        assert ack["success"] is True
+        assert ack["message"] == "major breakage applied"
+        assert set(rt.irregularities.active_faults()) == {
+            "pump_degradation",
+            "heater_degradation",
+            "clogged_group",
+        }
+        assert rt.config["irregularities"]["pump_degradation"]["enabled"] is False
+        rt.machine.active_faults = rt.irregularities.active_faults()
+        rt.machine.sample(1.0)
+        assert rt.machine.state == "fault"
+
+    def test_reset_clears_breakage_and_restores_healthy_config(self):
+        rt = DeviceRuntime({"device_id": "espresso-001", "publish_interval_s": 5})
+        rt.handle_command({"cmd": "major_breakage"})
+        ack = rt.handle_command({"cmd": "reset"})
+        assert ack["success"] is True
+        assert ack["message"] == "reset applied"
+        assert rt.irregularities.active_faults() == []
+        assert rt.config["publish_interval_s"] == 30
+        assert rt.config["irregularities"]["pump_degradation"]["enabled"] is False
+        rt.machine.active_faults = []
+        rt.machine._state = "fault"
+        rt.machine.sample(1.0)
+        assert rt.machine.state == "idle"

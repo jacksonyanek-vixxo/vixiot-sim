@@ -81,6 +81,10 @@ class EspressoMachine:
 
         if self.active_faults:
             self._state = "fault"
+        elif self._state == "fault":
+            self._state = "idle"
+            self._state_ticks = 0
+            self._state_duration = 10
 
         samples = {}
         for name, spec in METRIC_SPECS.items():

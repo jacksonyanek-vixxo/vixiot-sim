@@ -241,6 +241,22 @@ class SinkHub:
         )
         return command
 
+    def reset_machine(self, device_id):
+        """Clear active breakage and return the device to the healthy config."""
+        command = {"cmd": "reset", "device_id": device_id}
+        self._client.publish(
+            "vixiot/%s/cmd" % device_id, json.dumps(command), qos=1
+        )
+        return command
+
+    def major_breakage(self, device_id):
+        """One-shot command. The device faults immediately and does not save it."""
+        command = {"cmd": "major_breakage", "device_id": device_id}
+        self._client.publish(
+            "vixiot/%s/cmd" % device_id, json.dumps(command), qos=1
+        )
+        return command
+
     def devices(self):
         with self._lock:
             ids = (

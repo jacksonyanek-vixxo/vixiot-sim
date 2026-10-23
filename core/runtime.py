@@ -2,7 +2,12 @@
 
 from core.aggregation import Aggregator, should_report_by_exception
 from core.buffer import StoreForwardBuffer
-from core.config import normalize_config, apply_set_config
+from core.config import (
+    DEFAULT_EVENTS,
+    DEFAULT_IRREGULARITIES,
+    normalize_config,
+    apply_set_config,
+)
 from core.espresso import EspressoMachine
 from core.events import EventEngine
 from core.irregularities import IrregularityEngine
@@ -139,8 +144,25 @@ class DeviceRuntime:
                 messages.append(self.build_publish(timestamp))
         return messages, event_messages
 
+    MAJOR_BREAKAGE = ("pump_degradation", "heater_degradation", "clogged_group")
+
     def handle_command(self, command):
         try:
+            if command.get("cmd") == "major_breakage":
+                self.irregularities.force_active(self.MAJOR_BREAKAGE, severity=1.0)
+                return build_cmd_ack(
+                    self.config["device_id"], True, "major breakage applied", self.config
+                )
+            if command.get("cmd") == "reset":
+                cfg = self.apply_config({
+                    "cmd": "set_config",
+                    "sample_interval_ms": 1000,
+                    "publish_interval_s": 30,
+                    "irregularities": DEFAULT_IRREGULARITIES,
+                    "events": DEFAULT_EVENTS,
+                })
+                self.irregularities.clear_active()
+                return build_cmd_ack(self.config["device_id"], True, "reset applied", cfg)
             cfg = self.apply_config(command)
             return build_cmd_ack(self.config["device_id"], True, "config applied", cfg)
         except Exception as e:
