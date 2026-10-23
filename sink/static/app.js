@@ -24,33 +24,132 @@ const METRIC_TILES = [
 const CHART_SPECS = {
   temperatureChart: {
     title: "Temperatures",
-    desc: "Boiler and ambient heat — steady brew temp is critical for extraction quality.",
+    desc: "Heat in the boilers. A steady brew temperature makes a consistent shot.",
     unit: "degC",
     metrics: [["brew_boiler_temp", "Brew boiler"], ["steam_boiler_temp", "Steam boiler"], ["ambient_temp", "Ambient"]],
     bandMetric: "brew_boiler_temp",
   },
   pressureChart: {
     title: "Brew pressure",
-    desc: "Extraction pressure during a shot — target ~9 bar while brewing.",
+    desc: "Pressure while a shot is pouring. About 9 bar is the target.",
     unit: "bar",
     metrics: [["brew_pressure", "Pressure"]],
     bandMetric: "brew_pressure",
   },
   flowChart: {
     title: "Water flow",
-    desc: "Flow rate through the group head — spikes during active brewing.",
+    desc: "Water moving through the group. It rises while a shot is pouring.",
     unit: "ml_s",
     metrics: [["water_flow", "Flow"]],
     bandMetric: "water_flow",
   },
   currentChart: {
-    title: "Motor currents",
-    desc: "Pump and grinder draw — unusual spikes can indicate wear or blockage.",
+    title: "Pump and grinder",
+    desc: "Power those motors draw. A spike can mean wear or a blockage.",
     unit: "A",
     metrics: [["pump_current", "Pump"], ["grinder_current", "Grinder"]],
     bandMetric: "pump_current",
   },
 };
+
+const CHART_PALETTE = ["#38bdf8", "#a78bfa", "#2dd4bf", "#f472b6"];
+
+function buildChart(canvas, spec, compact) {
+  const healthy = METRIC_SPECS[spec.bandMetric]?.healthy;
+  const unitLabel = formatUnit(spec.unit);
+  const ranges = spec.metrics.map(([key]) => METRIC_SPECS[key]?.healthy).filter(Boolean);
+  const yMin = ranges.length ? Math.min(...ranges.map(range => range[0])) : undefined;
+  const yMax = ranges.length ? Math.max(...ranges.map(range => range[1])) : undefined;
+  return new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: spec.metrics.map(([metricKey, label], index) => ({
+        metricKey,
+        label,
+        data: [],
+        _qualities: [],
+        _windows: [],
+        borderColor: CHART_PALETTE[index % CHART_PALETTE.length],
+        backgroundColor: CHART_PALETTE[index % CHART_PALETTE.length] + "22",
+        borderWidth: 2,
+        pointRadius: compact ? 2 : 3,
+        pointHoverRadius: 5,
+        pointBackgroundColor: context => {
+          const quality = context.dataset._qualities?.[context.dataIndex];
+          return QUALITY_COLORS[quality] || CHART_PALETTE[index % CHART_PALETTE.length];
+        },
+        pointBorderColor: "#0f172a",
+        pointBorderWidth: 1,
+        tension: 0.25,
+        spanGaps: true,
+      })),
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          display: !compact,
+          position: "top",
+          align: "end",
+          labels: { color: "#cbd5e1", boxWidth: 10, boxHeight: 10, padding: 14, font: { size: 11 } },
+        },
+        healthyBand: {
+          band: healthy,
+          color: "rgba(45, 212, 191, 0.08)",
+          borderColor: "rgba(45, 212, 191, 0.3)",
+        },
+        tooltip: {
+          backgroundColor: "#0f172a",
+          borderColor: "#334155",
+          borderWidth: 1,
+          titleColor: "#e2e8f0",
+          bodyColor: "#cbd5e1",
+          footerColor: "#94a3b8",
+          padding: 12,
+          callbacks: {
+            title: items => items[0]?.label || "",
+            label: context => {
+              const value = context.parsed.y;
+              if (value == null) return `${context.dataset.label}: no reading`;
+              const unit = formatUnit(METRIC_SPECS[context.dataset.metricKey]?.unit || spec.unit);
+              const quality = context.dataset._qualities?.[context.dataIndex] || "missing";
+              return `${context.dataset.label}: ${value} ${unit} (${QUALITY_LABELS[quality] || quality})`;
+            },
+            afterBody: items => {
+              const lines = [];
+              for (const item of items) {
+                const window = item.dataset._windows?.[item.dataIndex];
+                if (!window) continue;
+                const unit = formatUnit(METRIC_SPECS[item.dataset.metricKey]?.unit || spec.unit);
+                lines.push(`${item.dataset.label} over this report: low ${window.min}, high ${window.max}, average ${window.mean} ${unit}`);
+              }
+              return lines;
+            },
+            footer: () => healthy ? `Normal range: ${healthy[0]}-${healthy[1]} ${unitLabel}` : "",
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: "#64748b", maxTicksLimit: compact ? 4 : 8, font: { size: 10 } },
+          grid: { color: "#1e293b" },
+          title: { display: !compact, text: "Time", color: "#64748b", font: { size: 11, weight: 600 } },
+        },
+        y: {
+          suggestedMin: yMin,
+          suggestedMax: yMax,
+          ticks: { color: "#64748b", font: { size: 10 } },
+          grid: { color: "#1e293b" },
+          title: { display: !compact, text: unitLabel, color: "#64748b", font: { size: 11, weight: 600 } },
+        },
+      },
+    },
+  });
+}
 
 const healthyBandPlugin = {
   id: "healthyBand",
@@ -63,6 +162,9 @@ const healthyBandPlugin = {
     const top = yScale.getPixelForValue(band[1]);
     const bottom = yScale.getPixelForValue(band[0]);
     ctx.save();
+    ctx.beginPath();
+    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top);
+    ctx.clip();
     ctx.fillStyle = options.color || "rgba(45, 212, 191, 0.1)";
     ctx.fillRect(chartArea.left, top, chartArea.right - chartArea.left, bottom - top);
     ctx.strokeStyle = options.borderColor || "rgba(45, 212, 191, 0.35)";
@@ -117,6 +219,8 @@ function healthyHint(metricKey) {
   return `${lo}–${hi} ${formatUnit(spec.unit)}`;
 }
 
+let chartsReady = false;
+
 document.addEventListener("alpine:init", () => {
   Alpine.data("dashboard", () => {
     // Chart.js instances must stay OUT of Alpine's reactive proxy — wrapping them
@@ -147,6 +251,7 @@ document.addEventListener("alpine:init", () => {
     error: "",
     notice: "",
     saving: false,
+    expandedChart: null,
 
     async init() {
       await new Promise(resolve => requestAnimationFrame(resolve));
@@ -255,8 +360,16 @@ document.addEventListener("alpine:init", () => {
         this.events = this.events.slice(0, 500);
       } else if (event.type === "cmd_ack") {
         this.lastAck = event.data;
-        this.notice = event.data.success ? "Configuration applied by device" : "";
-        if (!event.data.success) this.error = event.data.message || "Device rejected configuration";
+        if (event.data.success) {
+          const replies = {
+            "reset applied": "Reset applied. The machine is back to normal.",
+            "major breakage applied": "Major breakage applied.",
+          };
+          this.notice = replies[event.data.message] || "Configuration applied by device";
+        } else {
+          this.notice = "";
+          this.error = event.data.message || "Device rejected configuration";
+        }
       }
     },
 
@@ -352,106 +465,102 @@ document.addEventListener("alpine:init", () => {
     },
 
     createCharts() {
+      if (chartsReady) return;
       if (typeof Chart === "undefined") throw new Error("Chart.js did not load");
       if (!Chart.registry.plugins.get("healthyBand")) Chart.register(healthyBandPlugin);
-
-      const palette = ["#38bdf8", "#a78bfa", "#2dd4bf", "#f472b6"];
+      chartsReady = true;
       for (const [elementId, spec] of Object.entries(CHART_SPECS)) {
-        const bandMetric = spec.bandMetric;
-        const healthy = METRIC_SPECS[bandMetric]?.healthy;
-        const unitLabel = formatUnit(spec.unit);
         const canvas = document.getElementById(elementId);
         if (!canvas) throw new Error(`Missing chart canvas: ${elementId}`);
+        const existing = Chart.getChart(canvas);
+        if (existing) existing.destroy();
+        chartRegistry[elementId] = buildChart(canvas, spec, true);
+      }
+    },
 
-        chartRegistry[elementId] = new Chart(canvas, {
-          type: "line",
-          data: {
-            labels: [],
-            datasets: spec.metrics.map(([metricKey, label], index) => {
-              const colorIndex = index;
-              return {
-              metricKey,
-              label,
-              data: [],
-              _qualities: [],
-              _windows: [],
-              borderColor: palette[colorIndex % palette.length],
-              backgroundColor: palette[colorIndex % palette.length] + "22",
-              borderWidth: 2,
-              pointRadius: 3,
-              pointHoverRadius: 5,
-              pointBackgroundColor: context => {
-                const quality = context.dataset._qualities?.[context.dataIndex];
-                return QUALITY_COLORS[quality] || palette[colorIndex % palette.length];
-              },
-              pointBorderColor: "#0f172a",
-              pointBorderWidth: 1,
-              tension: 0.25,
-              spanGaps: true,
-            };
-            }),
-          },
-          options: {
-            animation: false,
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: "index", intersect: false },
-            plugins: {
-              legend: {
-                position: "top",
-                align: "end",
-                labels: { color: "#cbd5e1", boxWidth: 10, boxHeight: 10, padding: 14, font: { size: 11 } },
-              },
-              healthyBand: {
-                band: healthy,
-                color: "rgba(45, 212, 191, 0.08)",
-                borderColor: "rgba(45, 212, 191, 0.3)",
-              },
-              tooltip: {
-                backgroundColor: "#0f172a",
-                borderColor: "#334155",
-                borderWidth: 1,
-                titleColor: "#e2e8f0",
-                bodyColor: "#cbd5e1",
-                footerColor: "#94a3b8",
-                padding: 12,
-                callbacks: {
-                  title: items => items[0]?.label || "",
-                  label: context => {
-                    const value = context.parsed.y;
-                    if (value == null) return `${context.dataset.label}: no data`;
-                    const unit = formatUnit(METRIC_SPECS[context.dataset.metricKey]?.unit || spec.unit);
-                    const quality = context.dataset._qualities?.[context.dataIndex] || "missing";
-                    return `${context.dataset.label}: ${value} ${unit} (${QUALITY_LABELS[quality] || quality})`;
-                  },
-                  afterBody: items => {
-                    const lines = [];
-                    for (const item of items) {
-                      const window = item.dataset._windows?.[item.dataIndex];
-                      if (!window) continue;
-                      const unit = formatUnit(METRIC_SPECS[item.dataset.metricKey]?.unit || spec.unit);
-                      lines.push(`${item.dataset.label} window: min ${window.min}, max ${window.max}, avg ${window.mean} ${unit}`);
-                    }
-                    return lines;
-                  },
-                  footer: () => healthy ? `Healthy band: ${healthy[0]}-${healthy[1]} ${unitLabel}` : "",
-                },
-              },
-            },
-            scales: {
-              x: {
-                ticks: { color: "#64748b", maxTicksLimit: 6, font: { size: 10 } },
-                grid: { color: "#1e293b" },
-                title: { display: true, text: "Time", color: "#64748b", font: { size: 10, weight: 600 } },
-              },
-              y: {
-                ticks: { color: "#64748b", font: { size: 10 } },
-                grid: { color: "#1e293b" },
-                title: { display: true, text: unitLabel, color: "#64748b", font: { size: 10, weight: 600 } },
-              },
-            },
-          },
-        });
+    expandChart(id) {
+      if (!CHART_SPECS[id]) return;
+      this.destroyExpanded();
+      this.expandedChart = id;
+      this.$nextTick(() => requestAnimationFrame(() => this.mountExpanded()));
+    },
+
+    closeChart() {
+      if (!this.expandedChart) return;
+      this.destroyExpanded();
+      this.expandedChart = null;
+    },
+
+    destroyExpanded() {
+      if (chartRegistry.expanded) {
+        chartRegistry.expanded.destroy();
+        delete chartRegistry.expanded;
+      }
+    },
+
+    mountExpanded() {
+      if (!this.expandedChart) return;
+      const canvas = document.getElementById("expandedChart");
+      const spec = CHART_SPECS[this.expandedChart];
+      if (!canvas || !spec) return;
+      this.destroyExpanded();
+      chartRegistry.expanded = buildChart(canvas, spec, false);
+      this.paintChart(chartRegistry.expanded, this.chartRecords());
+    },
+
+    expandedTitle() {
+      return CHART_SPECS[this.expandedChart]?.title || "Chart";
+    },
+
+    expandedDesc() {
+      return CHART_SPECS[this.expandedChart]?.desc || "";
+    },
+
+    connectionLabel() {
+      if (this.snapshot.online || this.snapshot.connection_status === "online") return "Connected";
+      if (this.snapshot.connection_status === "offline") return "Offline";
+      return "Waiting";
+    },
+
+    machineStatus() {
+      const labels = {
+        idle: "Idle",
+        brewing: "Brewing",
+        steaming: "Steaming",
+        cleaning: "Cleaning",
+        fault: "Fault",
+      };
+      return labels[this.snapshot.state] || "—";
+    },
+
+    async resetMachine() {
+      if (!this.selectedId) return;
+      this.healthyPreset();
+      this.saving = true;
+      this.error = "";
+      this.notice = "";
+      try {
+        await this.request(`/api/reset/${encodeURIComponent(this.selectedId)}`, { method: "POST" });
+        this.notice = "Reset sent. Breakage is cleared and the machine returns to normal.";
+      } catch (error) {
+        this.error = error.message;
+      } finally {
+        this.saving = false;
+      }
+    },
+
+    async majorBreakage() {
+      if (!this.selectedId) return;
+      this.saving = true;
+      this.error = "";
+      this.notice = "";
+      try {
+        await this.request(`/api/breakage/${encodeURIComponent(this.selectedId)}`, { method: "POST" });
+        this.notice = "Major breakage sent. The pump, heater, and group fail once.";
+      } catch (error) {
+        this.error = error.message;
+      } finally {
+        this.saving = false;
       }
     },
 
@@ -464,22 +573,24 @@ document.addEventListener("alpine:init", () => {
       return [];
     },
 
+    paintChart(chart, records) {
+      chart.data.labels = records.map(item => this.formatTime(item.timestamp));
+      for (const dataset of chart.data.datasets) {
+        dataset.data = records.map(item => item.metrics?.[dataset.metricKey]?.value ?? null);
+        dataset._qualities = records.map(item => item.metrics?.[dataset.metricKey]?.quality || "missing");
+        dataset._windows = records.map(item => {
+          const metric = item.metrics?.[dataset.metricKey];
+          return metric?.min != null ? { min: metric.min, max: metric.max, mean: metric.mean } : null;
+        });
+      }
+      chart.update("none");
+      if (typeof chart.resize === "function") chart.resize();
+    },
+
     refreshCharts() {
       if (!Object.keys(chartRegistry).length) return;
       const records = this.chartRecords();
-      for (const chart of Object.values(chartRegistry)) {
-        chart.data.labels = records.map(item => this.formatTime(item.timestamp));
-        for (const dataset of chart.data.datasets) {
-          dataset.data = records.map(item => item.metrics?.[dataset.metricKey]?.value ?? null);
-          dataset._qualities = records.map(item => item.metrics?.[dataset.metricKey]?.quality || "missing");
-          dataset._windows = records.map(item => {
-            const metric = item.metrics?.[dataset.metricKey];
-            return metric?.min != null ? { min: metric.min, max: metric.max, mean: metric.mean } : null;
-          });
-        }
-        chart.update("none");
-        if (typeof chart.resize === "function") chart.resize();
-      }
+      for (const chart of Object.values(chartRegistry)) this.paintChart(chart, records);
     },
 
     get activeFaults() { return this.snapshot.active_faults || []; },

@@ -81,6 +81,22 @@ class IrregularityEngine:
     def active_faults(self):
         return sorted(self._active_domain)
 
+    def clear_active(self):
+        """Drop faults already in progress, including a one-shot breakage."""
+        self._active_domain.clear()
+        self._drift_offsets.clear()
+        self._stuck_values.clear()
+
+    def force_active(self, names, severity=1.0):
+        """Start domain faults immediately. One-shot; not written back as a mode."""
+        for name in names:
+            if name not in DOMAIN_FAULTS:
+                continue
+            cfg = dict(self._cfg(name))
+            cfg["severity"] = severity
+            self._config[name] = cfg
+            self._active_domain.add(name)
+
     def _apply_domain(self, samples):
         result = {k: dict(v) for k, v in samples.items()}
 

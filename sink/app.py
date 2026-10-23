@@ -151,6 +151,16 @@ def create_app(hub=None, manage_hub=True):
             raise HTTPException(status_code=422, detail=str(error)) from error
         return {"accepted": True, "command": command}
 
+    @application.post("/api/reset/{device_id}")
+    def reset_machine(device_id):
+        command = sink_hub.reset_machine(device_id)
+        return {"accepted": True, "command": command}
+
+    @application.post("/api/breakage/{device_id}")
+    def major_breakage(device_id):
+        command = sink_hub.major_breakage(device_id)
+        return {"accepted": True, "command": command}
+
     @application.websocket("/ws")
     async def websocket(socket: WebSocket):
         await socket.accept()

@@ -134,7 +134,7 @@ def main():
         try:
             command = json.loads(msg)
             ack = runtime.handle_command(command)
-            if command.get("cmd") == "set_config" and ack.get("success"):
+            if command.get("cmd") in ("set_config", "reset") and ack.get("success"):
                 storage.save_config(runtime.config)
             client.publish(topics["cmd_ack"], json.dumps(ack), qos=1)
         except Exception as e:
